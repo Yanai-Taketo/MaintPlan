@@ -2,13 +2,6 @@ using MaintPlan.Core.Model;
 
 namespace MaintPlan.Core.Calculation;
 
-/// <summary>山積みの集計。</summary>
-public static class QuarterlyAggregation
-{
-    public static AggregationResult Calculate(PlanData plan, AggregationCondition condition) =>
-        throw new NotImplementedException();
-}
-
 /// <summary>残予算と見込み残。</summary>
 public static class RemainingBudget
 {
