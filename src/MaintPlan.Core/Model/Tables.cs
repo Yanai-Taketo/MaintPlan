@@ -152,7 +152,7 @@ public sealed record LaborLine
     public required long WorkDaysTenths { get; init; }
 
     /// <summary>人工(人数×作業日数)を10倍した整数。</summary>
-    public long ManDaysTenths => Headcount * WorkDaysTenths;
+    public long ManDaysTenths => checked(Headcount * WorkDaysTenths);
 
     public bool IsDeleted { get; init; }
 }
