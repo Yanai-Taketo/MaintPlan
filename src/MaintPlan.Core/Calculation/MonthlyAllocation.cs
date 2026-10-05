@@ -43,13 +43,6 @@ public static class MonthlyAllocation
         return new MonthlyAllocationResult(summed, manDays, unusedOverrides);
     }
 
-    /// <summary>費用内訳1件の人工を、作業明細の行ごとに月の欄(工事の日付が空欄なら時期未定の欄)へ割り振る。</summary>
-    internal static IEnumerable<LaborLineSlotManDays> ManDaysOf(PlanData plan, CostItem item)
-    {
-        var work = plan.ConstructionWorks.Single(work => work.Id == item.ConstructionWorkId);
-        return ManDaysOf(work, WorkPeriodOf(work), plan.LaborLines.Where(line => !line.IsDeleted && line.CostItemId == item.Id));
-    }
-
     /// <summary>工期の月ごとの日数。工事の日付が空欄なら null。</summary>
     internal static IReadOnlyList<MonthDays>? WorkPeriodOf(ConstructionWork work) =>
         DatesOf(work.StartDate, work.EndDate, $"工事(ID {work.Id})") is { } dates ? Period.DaysByMonth(dates.Start, dates.End) : null;
@@ -177,7 +170,7 @@ public static class MonthlyAllocation
     /// 人工。作業明細の行ごとに、その行の期間(日付が空欄なら工期)の各月へ割り振る。
     /// 工事の日付が空欄なら、作業明細の日付によらず時期未定の欄に入れる。
     /// </summary>
-    private static IEnumerable<LaborLineSlotManDays> ManDaysOf(ConstructionWork work, IReadOnlyList<MonthDays>? period, IEnumerable<LaborLine> laborLines)
+    internal static IEnumerable<LaborLineSlotManDays> ManDaysOf(ConstructionWork work, IReadOnlyList<MonthDays>? period, IEnumerable<LaborLine> laborLines)
     {
         foreach (var line in laborLines)
         {

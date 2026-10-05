@@ -134,8 +134,18 @@ public static class ResultTables
     /// </summary>
     public static TextTable LaborCosts(PlanData plan, IReadOnlyDictionary<int, BudgetInitialValueResult> results, IReadOnlyList<string> columns)
     {
-        var index = new PlanIndex(plan);
+        if (!columns.Contains("年度"))
+        {
+            throw new ArgumentException("「労務費の内訳」には「年度」の列を置きます。", nameof(columns));
+        }
+
         var byStaff = columns.Contains("人員区分");
+        if (byStaff && columns.Contains("行"))
+        {
+            throw new ArgumentException("「労務費の内訳」には「人員区分」と「行」のどちらか一方の列を置きます。", nameof(columns));
+        }
+
+        var index = new PlanIndex(plan);
         var entries = results
             .Where(pair => pair.Value.IsProduced)
             .SelectMany(pair => pair.Value.LaborCostEntries.Select(entry => (CostItemId: pair.Key, Entry: entry)))
@@ -248,14 +258,8 @@ public static class ResultTables
     /// <summary>知らせる内容。足りない単価を種別・表示順・年度の順に並べる。なければ「なし」。</summary>
     private static string NoticeText(PlanIndex index, IEnumerable<MissingUnitRate> missing)
     {
-        var items = missing
-            .Distinct()
-            .Select(rate => (Category: index.StaffCategories[rate.StaffCategoryId], rate.FiscalYear))
-            .OrderBy(rate => rate.Category.Kind)
-            .ThenBy(rate => rate.Category.DisplayOrder)
-            .ThenBy(rate => rate.Category.Id)
-            .ThenBy(rate => rate.FiscalYear)
-            .Select(rate => $"{CellText.StaffCategory(rate.Category)}の{CellText.FiscalYear(rate.FiscalYear)}")
+        var items = BudgetInitialValue.OrderMissingUnitRates(missing, index.StaffCategories.Values)
+            .Select(rate => $"{CellText.StaffCategory(index.StaffCategories[rate.StaffCategoryId])}の{CellText.FiscalYear(rate.FiscalYear)}")
             .ToList();
         return items.Count == 0 ? CellText.None : $"足りない単価:{string.Join("、", items)}";
     }

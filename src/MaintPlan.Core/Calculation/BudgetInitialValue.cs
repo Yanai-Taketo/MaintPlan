@@ -11,61 +11,100 @@ public static class BudgetInitialValue
     /// 予算額の計算に含めない人員区分の行は、労務費に入れない。
     /// 工事の日付と実施年度がどちらも空欄のときと、必要な年度の単価が登録されていないときは、初期値を出さない。
     /// </summary>
-    public static BudgetInitialValueResult Calculate(PlanData plan, int costItemId)
+    public static BudgetInitialValueResult Calculate(PlanData plan, int costItemId) => new Calculator(plan).Calculate(costItemId);
+
+    /// <summary>計算の対象の費用内訳すべての予算額の初期値。キーは費用内訳ID。</summary>
+    public static IReadOnlyDictionary<int, BudgetInitialValueResult> CalculateAll(PlanData plan)
     {
-        var item = CalculationTargets.CostItems(plan).SingleOrDefault(item => item.Id == costItemId)
-            ?? throw new ArgumentException($"費用内訳(ID {costItemId})は計算の対象ではありません。", nameof(costItemId));
-        var work = plan.ConstructionWorks.Single(work => work.Id == item.ConstructionWorkId);
-        var period = MonthlyAllocation.WorkPeriodOf(work);
-        if (period is null && work.PlannedFiscalYear is null)
-        {
-            return new BudgetInitialValueResult { IsProduced = false };
-        }
+        var calculator = new Calculator(plan);
+        return CalculationTargets.CostItems(plan).ToDictionary(item => item.Id, item => calculator.Calculate(item.Id));
+    }
 
-        var categories = plan.StaffCategories.ToDictionary(category => category.Id);
-        var lines = plan.LaborLines.ToDictionary(line => line.Id);
-        var rates = UnitRatesOf(plan);
-
-        // 作業明細の行・年度ごとの人工。行の期間が1日でもかかる年度は、人工が0でも単価が要る。
-        var manDays = MonthlyAllocation.ManDaysOf(plan, item)
-            .Where(entry => CategoryOf(categories, lines[entry.LaborLineId]).IncludeInBudget)
-            .GroupBy(entry => (entry.LaborLineId, FiscalYear: entry.Slot.FiscalYear!.Value))
-            .Select(group => (group.Key.LaborLineId, group.Key.FiscalYear, ManDaysTenths: group.Sum(entry => entry.ManDaysTenths)))
-            .ToList();
-
-        var missing = manDays
-            .Select(entry => (Category: CategoryOf(categories, lines[entry.LaborLineId]), entry.FiscalYear))
-            .Where(entry => !rates.ContainsKey((entry.Category.Id, entry.FiscalYear)))
+    /// <summary>足りない単価を、人員区分の種別・表示順・年度の順に並べる。同じ人員区分・年度は1件にする。</summary>
+    public static IReadOnlyList<MissingUnitRate> OrderMissingUnitRates(IEnumerable<MissingUnitRate> rates, IEnumerable<StaffCategory> categories)
+    {
+        var byId = categories.ToDictionary(category => category.Id);
+        return [.. rates
             .Distinct()
-            .OrderBy(entry => entry.Category.Kind)
-            .ThenBy(entry => entry.Category.DisplayOrder)
-            .ThenBy(entry => entry.Category.Id)
-            .ThenBy(entry => entry.FiscalYear)
-            .Select(entry => new MissingUnitRate(entry.Category.Id, entry.FiscalYear))
-            .ToList();
-        if (missing.Count > 0)
+            .OrderBy(rate => byId[rate.StaffCategoryId].Kind)
+            .ThenBy(rate => byId[rate.StaffCategoryId].DisplayOrder)
+            .ThenBy(rate => rate.StaffCategoryId)
+            .ThenBy(rate => rate.FiscalYear)];
+    }
+
+    /// <summary>計画1つ分の索引を持ち、費用内訳ごとの初期値を求める。</summary>
+    private sealed class Calculator
+    {
+        private readonly Dictionary<int, CostItem> items;
+        private readonly Dictionary<int, ConstructionWork> works;
+        private readonly ILookup<int, LaborLine> laborLines;
+        private readonly Dictionary<int, StaffCategory> categories;
+        private readonly Dictionary<(int StaffCategoryId, int FiscalYear), long> rates;
+
+        public Calculator(PlanData plan)
         {
-            return new BudgetInitialValueResult { IsProduced = false, MissingUnitRates = missing };
+            items = CalculationTargets.CostItems(plan).ToDictionary(item => item.Id);
+            works = plan.ConstructionWorks.ToDictionary(work => work.Id);
+            laborLines = plan.LaborLines.Where(line => !line.IsDeleted).ToLookup(line => line.CostItemId);
+            categories = plan.StaffCategories.ToDictionary(category => category.Id);
+            rates = UnitRatesOf(plan);
         }
 
-        var entries = manDays
-            .Select(entry =>
-            {
-                var rate = rates[(lines[entry.LaborLineId].StaffCategoryId, entry.FiscalYear)];
-                return new LaborCostEntry(entry.LaborLineId, entry.FiscalYear, entry.ManDaysTenths, rate, checked(entry.ManDaysTenths * rate) / 10);
-            })
-            .ToList();
-        var laborCost = entries.Sum(entry => entry.Cost);
-        var total = checked(laborCost + (item.OtherCost ?? 0));
-
-        return new BudgetInitialValueResult
+        public BudgetInitialValueResult Calculate(int costItemId)
         {
-            IsProduced = true,
-            LaborCost = laborCost,
-            Total = total,
-            Allocations = AllocateToFiscalYears(item, work, period, total),
-            LaborCostEntries = entries,
-        };
+            var item = items.GetValueOrDefault(costItemId)
+                ?? throw new ArgumentException($"費用内訳(ID {costItemId})は計算の対象ではありません。", nameof(costItemId));
+            var work = works[item.ConstructionWorkId];
+            var period = MonthlyAllocation.WorkPeriodOf(work);
+            var lines = laborLines[item.Id].ToList();
+            var slots = MonthlyAllocation.ManDaysOf(work, period, lines).ToList();
+            var included = lines.Where(line => CategoryOf(line).IncludeInBudget).Select(line => line.Id).ToHashSet();
+            if (period is null && work.PlannedFiscalYear is null)
+            {
+                return new BudgetInitialValueResult { IsProduced = false };
+            }
+
+            // 作業明細の行・年度ごとの人工。行の期間が1日でもかかる年度は、人工が0でも単価が要る。
+            var manDays = slots
+                .Where(entry => included.Contains(entry.LaborLineId))
+                .GroupBy(entry => (entry.LaborLineId, FiscalYear: entry.Slot.FiscalYear!.Value))
+                .Select(group => (group.Key.LaborLineId, group.Key.FiscalYear, ManDaysTenths: group.Sum(entry => entry.ManDaysTenths)))
+                .ToList();
+            var categoryOfLine = lines.ToDictionary(line => line.Id, line => line.StaffCategoryId);
+
+            var missing = manDays
+                .Select(entry => new MissingUnitRate(categoryOfLine[entry.LaborLineId], entry.FiscalYear))
+                .Where(rate => !rates.ContainsKey((rate.StaffCategoryId, rate.FiscalYear)));
+            var orderedMissing = OrderMissingUnitRates(missing, categories.Values);
+            if (orderedMissing.Count > 0)
+            {
+                return new BudgetInitialValueResult { IsProduced = false, MissingUnitRates = orderedMissing };
+            }
+
+            var entries = manDays
+                .Select(entry =>
+                {
+                    var rate = rates[(categoryOfLine[entry.LaborLineId], entry.FiscalYear)];
+                    return new LaborCostEntry(entry.LaborLineId, entry.FiscalYear, entry.ManDaysTenths, rate, checked(entry.ManDaysTenths * rate) / 10);
+                })
+                .ToList();
+            var laborCost = entries.Sum(entry => entry.Cost);
+            var total = checked(laborCost + (item.OtherCost ?? 0));
+
+            return new BudgetInitialValueResult
+            {
+                IsProduced = true,
+                LaborCost = laborCost,
+                Total = total,
+                Allocations = AllocateToFiscalYears(item, work, period, total),
+                LaborCostEntries = entries,
+            };
+        }
+
+        private StaffCategory CategoryOf(LaborLine line) =>
+            categories.TryGetValue(line.StaffCategoryId, out var category)
+                ? category
+                : throw new InvalidOperationException($"作業明細(ID {line.Id})の人員区分(ID {line.StaffCategoryId})がありません。");
     }
 
     /// <summary>
@@ -105,9 +144,4 @@ public static class BudgetInitialValue
 
         return rates;
     }
-
-    private static StaffCategory CategoryOf(IReadOnlyDictionary<int, StaffCategory> categories, LaborLine line) =>
-        categories.TryGetValue(line.StaffCategoryId, out var category)
-            ? category
-            : throw new InvalidOperationException($"作業明細(ID {line.Id})の人員区分(ID {line.StaffCategoryId})がありません。");
 }
