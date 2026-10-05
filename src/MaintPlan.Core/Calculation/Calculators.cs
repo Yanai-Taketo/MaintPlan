@@ -2,13 +2,6 @@ using MaintPlan.Core.Model;
 
 namespace MaintPlan.Core.Calculation;
 
-/// <summary>予算額の初期値。</summary>
-public static class BudgetInitialValue
-{
-    public static BudgetInitialValueResult Calculate(PlanData plan, int costItemId) =>
-        throw new NotImplementedException();
-}
-
 /// <summary>山積みの集計。</summary>
 public static class QuarterlyAggregation
 {

@@ -43,8 +43,15 @@ public static class MonthlyAllocation
         return new MonthlyAllocationResult(summed, manDays, unusedOverrides);
     }
 
+    /// <summary>費用内訳1件の人工を、作業明細の行ごとに月の欄(工事の日付が空欄なら時期未定の欄)へ割り振る。</summary>
+    internal static IEnumerable<LaborLineSlotManDays> ManDaysOf(PlanData plan, CostItem item)
+    {
+        var work = plan.ConstructionWorks.Single(work => work.Id == item.ConstructionWorkId);
+        return ManDaysOf(work, WorkPeriodOf(work), plan.LaborLines.Where(line => !line.IsDeleted && line.CostItemId == item.Id));
+    }
+
     /// <summary>工期の月ごとの日数。工事の日付が空欄なら null。</summary>
-    private static IReadOnlyList<MonthDays>? WorkPeriodOf(ConstructionWork work) =>
+    internal static IReadOnlyList<MonthDays>? WorkPeriodOf(ConstructionWork work) =>
         DatesOf(work.StartDate, work.EndDate, $"工事(ID {work.Id})") is { } dates ? Period.DaysByMonth(dates.Start, dates.End) : null;
 
     /// <summary>開始日と終了日。両方空欄なら null。片方だけのときと、終了日が開始日より前のときは例外にする。</summary>
