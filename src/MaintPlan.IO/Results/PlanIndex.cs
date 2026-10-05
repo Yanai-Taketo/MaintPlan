@@ -1,3 +1,4 @@
+using MaintPlan.Core.Calculation;
 using MaintPlan.Core.Model;
 
 namespace MaintPlan.IO.Results;
@@ -5,7 +6,8 @@ namespace MaintPlan.IO.Results;
 /// <summary>計算結果の ID から、表に書く工事・費用内訳などを引くための索引。</summary>
 internal sealed class PlanIndex
 {
-    private readonly HashSet<int> costItemsWithBudget;
+    private readonly IReadOnlySet<int> budgetMissing;
+    private readonly IReadOnlySet<int> estimateMissing;
 
     public PlanIndex(PlanData plan)
     {
@@ -14,7 +16,9 @@ internal sealed class PlanIndex
         LaborLines = plan.LaborLines.ToDictionary(line => line.Id);
         StaffCategories = plan.StaffCategories.ToDictionary(category => category.Id);
         MonthlyOverrides = plan.MonthlyOverrides.ToDictionary(monthlyOverride => monthlyOverride.Id);
-        costItemsWithBudget = [.. plan.AnnualBudgets.Where(annual => !annual.IsDeleted).Select(annual => annual.CostItemId)];
+        TargetCostItems = CalculationTargets.CostItems(plan);
+        budgetMissing = CalculationTargets.MissingAmountCostItemIds(plan, AmountKind.Budget);
+        estimateMissing = CalculationTargets.MissingAmountCostItemIds(plan, AmountKind.Estimate);
     }
 
     public IReadOnlyDictionary<int, ConstructionWork> Works { get; }
@@ -27,11 +31,16 @@ internal sealed class PlanIndex
 
     public IReadOnlyDictionary<int, MonthlyOverride> MonthlyOverrides { get; }
 
+    /// <summary>計算の対象の費用内訳。</summary>
+    public IReadOnlyList<CostItem> TargetCostItems { get; }
+
     public ConstructionWork WorkOf(int costItemId) => Works[CostItems[costItemId].ConstructionWorkId];
 
-    /// <summary>見積額が未入力(空欄)か。</summary>
-    public bool IsEstimateMissing(int costItemId) => CostItems[costItemId].EstimateAmount is null;
-
-    /// <summary>予算額が未入力(年割が1件もない)か。</summary>
-    public bool IsBudgetMissing(int costItemId) => !costItemsWithBudget.Contains(costItemId);
+    /// <summary>その金額の種類が未入力の費用内訳か。</summary>
+    public bool IsMissing(int costItemId, AmountKind kind) => kind switch
+    {
+        AmountKind.Budget => budgetMissing.Contains(costItemId),
+        AmountKind.Estimate => estimateMissing.Contains(costItemId),
+        _ => false,
+    };
 }

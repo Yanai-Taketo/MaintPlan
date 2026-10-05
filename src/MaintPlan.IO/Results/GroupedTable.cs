@@ -26,16 +26,13 @@ internal static class GroupedTable
         }
 
         var usedKeys = keys.Where(key => columns.Contains(key.Name)).ToList();
-        IOrderedEnumerable<List<TEntry>> groups = entries
+        var order = Comparer<TEntry>.Create((left, right) => usedKeys
+            .Select(key => key.Order(left).CompareTo(key.Order(right)))
+            .FirstOrDefault(result => result != 0));
+        var rows = entries
             .GroupBy(entry => string.Join("\u001f", usedKeys.Select(key => key.Text(entry))))
             .Select(group => group.ToList())
-            .OrderBy(_ => 0);
-        foreach (var key in usedKeys)
-        {
-            groups = groups.ThenBy(group => key.Order(group[0]));
-        }
-
-        var rows = groups
+            .OrderBy(group => group[0], order)
             .Select(group => (IReadOnlyList<string>)[.. columns.Select(column => CellOf(column, group, keys, values))])
             .ToList();
         return new TextTable(columns, rows);

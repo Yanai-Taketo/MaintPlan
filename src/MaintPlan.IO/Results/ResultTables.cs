@@ -12,6 +12,11 @@ public static class ResultTables
     /// <summary>月ごとの日数(年月・日数)。最後に合計の行を置く。</summary>
     public static TextTable MonthDays(IReadOnlyList<MonthDays> days, IReadOnlyList<string> columns)
     {
+        if (!columns.Contains("年月"))
+        {
+            throw new ArgumentException("「月ごとの日数」には「年月」の列を置きます。", nameof(columns));
+        }
+
         IReadOnlyList<(string Month, long Days)> lines = [.. days.Select(entry => (entry.Month.ToString(), (long)entry.Days)), (CellText.Total, days.Sum(entry => (long)entry.Days))];
         return GroupedTable.Build(
             "月ごとの日数",
@@ -24,11 +29,13 @@ public static class ResultTables
     /// <summary>
     /// 月ごとの値(例・費用内訳・年月・予算額・見積額・実績額・人工)。
     /// 見積額が空欄の費用内訳の見積額と、年割が1件もない費用内訳の予算額は「未入力」と書く。
-    /// 1行にまとめた費用内訳がすべて未入力のときだけ「未入力」とし、入力済みのものがあればその合計を書く。
+    /// 「例」「費用内訳」の列を省いて複数の費用内訳を1行にまとめるときは、行の「例」「費用内訳」に当たる対象の費用内訳が
+    /// すべて未入力のときだけ「未入力」とし、入力済みのものがあればその合計を書く。
     /// </summary>
     public static TextTable MonthlyValues(PlanData plan, MonthlyAllocationResult result, IReadOnlyList<string> columns)
     {
         var index = new PlanIndex(plan);
+        var missing = MissingByRow(index, columns);
         var entries = result.Amounts
             .Select(amount => new MonthlyValueEntry(amount.CostItemId, amount.Slot, amount.Kind, amount.Amount, 0))
             .Concat(result.ManDays.Select(manDays => new MonthlyValueEntry(index.LaborLines[manDays.LaborLineId].CostItemId, manDays.Slot, null, 0, manDays.ManDaysTenths)));
@@ -38,8 +45,8 @@ public static class ResultTables
             entries,
             [ExampleColumn<MonthlyValueEntry>(index, entry => entry.CostItemId), CostItemColumn<MonthlyValueEntry>(index, entry => entry.CostItemId), SlotColumn<MonthlyValueEntry>(entry => entry.Slot)],
             [
-                new("予算額", group => AmountOrMissing(group, AmountKind.Budget, index.IsBudgetMissing)),
-                new("見積額", group => AmountOrMissing(group, AmountKind.Estimate, index.IsEstimateMissing)),
+                new("予算額", group => AmountOrMissing(group, AmountKind.Budget, missing)),
+                new("見積額", group => AmountOrMissing(group, AmountKind.Estimate, missing)),
                 new("実績額", group => CellText.Integer(group.Where(entry => entry.Kind == AmountKind.Actual).Sum(entry => entry.Amount))),
                 new("人工", group => CellText.ManDays(group.Sum(entry => entry.ManDaysTenths))),
             ]);
@@ -52,14 +59,15 @@ public static class ResultTables
     public static TextTable MonthlyManDays(PlanData plan, MonthlyAllocationResult result, IReadOnlyList<string> columns)
     {
         var index = new PlanIndex(plan);
-        var entries = result.ManDays.SelectMany(manDays =>
+        var withKindTotal = columns.Contains("人員区分");
+        var entries = result.ManDays.SelectMany(IEnumerable<ManDaysEntry> (manDays) =>
         {
             var line = index.LaborLines[manDays.LaborLineId];
             var category = index.StaffCategories[line.StaffCategoryId];
             var byCategory = new ManDaysEntry(line, manDays.Slot, manDays.ManDaysTenths, CellText.StaffCategory(category), StaffOrder(category, isKindTotal: false));
-            return columns.Contains("人員区分")
+            return withKindTotal
                 ? [byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffOrder(category, isKindTotal: true) }, byCategory]
-                : new[] { byCategory };
+                : [byCategory];
         });
         return GroupedTable.Build(
             "人工の月ごとの内訳",
@@ -140,10 +148,31 @@ public static class ResultTables
     private static IComparable StaffOrder(StaffCategory category, bool isKindTotal) =>
         (category.Kind, !isKindTotal, isKindTotal ? 0 : category.DisplayOrder, isKindTotal ? 0 : category.Id);
 
-    private static string AmountOrMissing(IReadOnlyList<MonthlyValueEntry> group, AmountKind kind, Func<int, bool> isMissing) =>
-        group.Select(entry => entry.CostItemId).Distinct().All(isMissing)
+    /// <summary>予算額か見積額のセル。行がすべて未入力なら「未入力」、そうでなければ合計。</summary>
+    private static string AmountOrMissing(IReadOnlyList<MonthlyValueEntry> group, AmountKind kind, Func<int, AmountKind, bool> isRowMissing) =>
+        isRowMissing(group[0].CostItemId, kind)
             ? CellText.Missing
             : CellText.Integer(group.Where(entry => entry.Kind == kind).Sum(entry => entry.Amount));
+
+    /// <summary>
+    /// 費用内訳 ID と金額の種類から、その費用内訳が入る行が未入力かを返す関数を作る。
+    /// 行の「例」「費用内訳」に当たる対象の費用内訳がすべて未入力なら未入力とする。列を省いた「例」「費用内訳」では絞らない。
+    /// </summary>
+    private static Func<int, AmountKind, bool> MissingByRow(PlanIndex index, IReadOnlyList<string> columns)
+    {
+        var byExample = columns.Contains("例");
+        var byCategory = columns.Contains("費用内訳");
+        (int? WorkId, CostCategory? Category) RowOf(CostItem item) =>
+            (byExample ? item.ConstructionWorkId : null, byCategory ? item.Category : null);
+
+        var rows = index.TargetCostItems
+            .GroupBy(RowOf)
+            .ToDictionary(
+                group => group.Key,
+                group => new HashSet<AmountKind>(
+                    new[] { AmountKind.Budget, AmountKind.Estimate }.Where(kind => group.All(item => index.IsMissing(item.Id, kind)))));
+        return (costItemId, kind) => rows[RowOf(index.CostItems[costItemId])].Contains(kind);
+    }
 
     /// <summary>月ごとの値の表の項目。金額(Kind が金額の種類)か人工(Kind が null)のどちらか。</summary>
     private sealed record MonthlyValueEntry(int CostItemId, Slot Slot, AmountKind? Kind, long Amount, long ManDaysTenths);

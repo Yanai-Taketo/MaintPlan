@@ -18,9 +18,11 @@ public static class Period
 
         var first = YearMonth.Of(start);
         var last = YearMonth.Of(end);
-        var days = new List<MonthDays>();
-        for (var month = first; month <= last; month = month.AddMonths(1))
+        var monthCount = (last.Year - first.Year) * 12 + last.Month - first.Month + 1;
+        var days = new List<MonthDays>(monthCount);
+        for (var offset = 0; offset < monthCount; offset++)
         {
+            var month = first.AddMonths(offset);
             var from = month == first ? start : month.FirstDay;
             var to = month == last ? end : month.LastDay;
             days.Add(new MonthDays(month, to.DayNumber - from.DayNumber + 1));
