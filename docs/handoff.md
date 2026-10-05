@@ -4,11 +4,11 @@
 
 ## 今の状態
 
-- 工程1の段1(ソリューション、CSV の読み込み、例1〜例15のテストデータ)は PR #1、段2(期間の数え方と月への割り振り)は PR #2 で main にマージ済み。
-- 段3(予算額の初期値)は作業ブランチ kotei1-dan3 で作り、PR で利用者の確認を待っている。
-- 段3まで入れた状態で、`dotnet test` は286件中254件が成功、32件が失敗。失敗はすべて段4〜6の計算のテストで、計算が未実装のため NotImplementedException になる。
+- 工程1の段1(ソリューション、CSV の読み込み、例1〜例15のテストデータ)は PR #1、段2(期間の数え方と月への割り振り)は PR #2、段3(予算額の初期値)は PR #3 で main にマージ済み。
+- 段4(山積みの集計)は作業ブランチ kotei1-dan4 で作り、PR で利用者の確認を待っている。
+- 段4まで入れた状態で、`dotnet test` は286件中265件が成功、21件が失敗。失敗はすべて段5・段6の計算のテストで、計算が未実装のため NotImplementedException になる。
 - テストデータの値は、利用者がすべてを確かめられていない。工程1が完成した後の点検で確かめる。
-- 次の作業は段4(山積みの集計)。
+- 次の作業は段5(残予算と見込み残)。
 
 ## 進め方の決まり
 
@@ -22,7 +22,7 @@
 | 場所 | 中身 |
 | --- | --- |
 | src/MaintPlan.Core/Model | 9つのテーブルの型(Tables.cs)、PlanData、YearMonth、選択項目の enum(Enums.cs)と設計書での呼び名(Labels.cs) |
-| src/MaintPlan.Core/Calculation | 計算と結果の型(Results.cs)。作った段の計算は1つずつファイルに分け(Period、MonthlyAllocation、BudgetInitialValue)、未実装の入口は Calculators.cs に残す。Proration は暦日の比での割り振り、CalculationTargets は計算の対象の費用内訳と未入力の費用内訳 |
+| src/MaintPlan.Core/Calculation | 計算と結果の型(Results.cs)。作った段の計算は1つずつファイルに分け(Period、MonthlyAllocation、BudgetInitialValue、QuarterlyAggregation)、未実装の入口は Calculators.cs に残す。Proration は暦日の比での割り振り、CalculationTargets は計算の対象の費用内訳と未入力の費用内訳 |
 | src/MaintPlan.IO/Csv | 9つのテーブルの CSV の読み込み(PlanCsvReader)と、CSV を表として読む CsvTable |
 | src/MaintPlan.IO/Results | 計算結果を4章の表の形にする ResultTables と TextTable。表は GroupedTable(キーの列で行をまとめて合計する)、CellText(セルの書き方)、PlanIndex(ID から工事・費用内訳などを引く)で作る |
 | src/MaintPlan.Cli | 確認用コンソール。中身は段7で作る |
@@ -43,11 +43,11 @@
 
 各段では、計算のほかに、その期待値の種類に当たる ResultTables のメソッドも作ります。
 
-## 段4で作るもの
+## 段5で作るもの
 
-- Core:`QuarterlyAggregation.Calculate`。仕様は設計書4章の「山積みの集計」。月ごとの値は `MonthlyAllocation` の結果を使い、未入力の費用内訳は `CalculationTargets.MissingAmountCostItemIds` を使う。
-- IO:`ResultTables` の `Aggregation`・`LaborBreakdown`・`MissingAmounts`。人員区分の列には、段2・段3と同じく種別ごとの合計の行と区分ごとの行の両方を置く。
-- 段4の完了の条件(8章):例1〜例5、例12の山積み、人工の内訳、未入力の件数が一致する。上の表の段4の11ファイルが該当する。
+- Core:`RemainingBudget.Calculate`。仕様は設計書4章の「残予算と見込み残」。見積額の月ごとの値は `MonthlyAllocation` の結果を使う。
+- IO:`ResultTables` の `RemainingBudget`・`UnrealizedBreakdown`。
+- 段5の完了の条件(8章):例1〜例5、例13の残予算と見込み残が一致する。上の表の段5の9ファイルが該当する。
 
 ## 確認済みの決まり
 
@@ -80,6 +80,21 @@
 6. 削除済みの単価は使わず、足りない単価として扱う。削除済みの人員区分の「予算額の計算に含める」はそのまま使う。同じ人員区分・年度の単価が重複したら InvalidOperationException にする。
 7. 種別ごとの行(「直営」など)の単価は、その行にまとめた単価がすべて同じときだけ書き、違うときは空欄にする。
 
+山積みの集計(段4)
+
+1. 年度の合計と、人工の直営・協力会社の別の内訳は、Core の結果(`AggregationResult`)に入れる。欄の種類に年度の合計(`AggregationColumnKind.FiscalYearTotal`)があり、人工の内訳は `StaffCategoryId` が空なら種別ごとの合計。`ResultTables` は文字にするだけとする。
+2. 山積みと人工の内訳の表には、金額か人工の値が1件でも入った欄(合計が0でも出す)と、その年度の合計の行を出す。値が1件も入らない欄の行は出さない。
+3. 人工の内訳にも「YYYY年度 合計」の行を置く。
+4. 未入力の件数は費用内訳の数で数える。対象は、その費用内訳の工事の管理番号を、工事 ID の順に重複なしで「、」でつなぐ。予算額・見積額は0件でも1行出し(対象は空欄)、実績額の行は出さない。
+5. 含める状態か費用区分が空なら、そのまま計算する(欄はすべて0、未入力は0件)。
+
+## 確認を受けていない決まり
+
+段4の実装で、設計書から決めたものです。利用者の明示の確認はまだです。
+
+1. 状態と費用区分の条件は、実績額にも当てる(4章の集計の条件の表による。条件で外れる工事に実績がある例はなく、期待値では縛られていない)。
+2. `ResultTables.Aggregation` は、列にある金額の種類の結果が渡されないときと、金額の種類ごとの結果で人工が食い違うとき(集計の条件の違う結果を渡したとき)に ArgumentException にする。
+
 ## 環境
 
 - .NET 10 SDK が入っていないコンテナでは、セッションの最初に `apt-get install -y dotnet-sdk-10.0` で入れる(Ubuntu のパッケージ。10.0.112 で動作を確認)。`dotnet --version` で入っているかを確かめる。
@@ -89,6 +104,6 @@
 
 ## 次に拾う項目
 
-1. 段3の PR の確認とマージ。
-2. 段4の着手:main から作業ブランチを切る。
+1. 段4の PR の確認とマージ。上の「確認を受けていない決まり」の確認。
+2. 段5の着手:main から作業ブランチを切る。
 3. 工程1が完成した後の、テストデータの値の点検。
