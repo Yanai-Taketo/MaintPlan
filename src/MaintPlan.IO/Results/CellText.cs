@@ -13,6 +13,12 @@ internal static class CellText
     /// <summary>合計の行に書く文字。</summary>
     public const string Total = "合計";
 
+    /// <summary>予算額の初期値を出さない費用内訳に書く文字。</summary>
+    public const string NotProduced = "出さない";
+
+    /// <summary>知らせる内容がないときに書く文字。</summary>
+    public const string None = "なし";
+
     /// <summary>金額や日数。桁区切りなしの整数。</summary>
     public static string Integer(long value) => value.ToString(CultureInfo.InvariantCulture);
 

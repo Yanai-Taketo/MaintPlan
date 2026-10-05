@@ -32,13 +32,7 @@ public static class ActualTables
             work.EndDate ?? throw new InvalidOperationException("工事の終了日が空欄です。"));
     }
 
-    private static Dictionary<int, BudgetInitialValueResult> InitialValues(PlanData plan)
-    {
-        var deletedWorks = plan.ConstructionWorks.Where(work => work.IsDeleted).Select(work => work.Id).ToHashSet();
-        return plan.CostItems
-            .Where(item => !item.IsDeleted && !deletedWorks.Contains(item.ConstructionWorkId))
-            .ToDictionary(item => item.Id, item => BudgetInitialValue.Calculate(plan, item.Id));
-    }
+    private static IReadOnlyDictionary<int, BudgetInitialValueResult> InitialValues(PlanData plan) => BudgetInitialValue.CalculateAll(plan);
 
     private static Dictionary<AmountKind, AggregationResult> Aggregate(TestCase testCase, PlanData plan, params AmountKind[] kinds) =>
         kinds.ToDictionary(

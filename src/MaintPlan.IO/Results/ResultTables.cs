@@ -104,13 +104,83 @@ public static class ResultTables
             ]);
     }
 
-    /// <summary>予算額の初期値(例・費用内訳・労務費・予算額の初期値・年割の初期値・知らせる内容)。キーは費用内訳ID。</summary>
-    public static TextTable BudgetInitialValues(PlanData plan, IReadOnlyDictionary<int, BudgetInitialValueResult> results, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+    /// <summary>
+    /// 予算額の初期値(例・費用内訳・労務費・予算額の初期値・年割の初期値・知らせる内容)。キーは費用内訳ID。
+    /// 初期値を出さない費用内訳は、予算額の初期値を「出さない」とし、労務費と年割の初期値を空欄にする。
+    /// 1行にまとめた費用内訳のうち1件でも初期値を出さないものがあれば、その行も同じように書く。
+    /// 知らせる内容は、足りない単価を「足りない単価:直営・電気の2028年度」の形で「、」でつなぎ、なければ「なし」と書く。
+    /// </summary>
+    public static TextTable BudgetInitialValues(PlanData plan, IReadOnlyDictionary<int, BudgetInitialValueResult> results, IReadOnlyList<string> columns)
+    {
+        var index = new PlanIndex(plan);
+        return GroupedTable.Build(
+            "予算額の初期値",
+            columns,
+            results.Select(pair => (CostItemId: pair.Key, Result: pair.Value)),
+            [ExampleColumn<(int CostItemId, BudgetInitialValueResult Result)>(index, entry => entry.CostItemId), CostItemColumn<(int CostItemId, BudgetInitialValueResult Result)>(index, entry => entry.CostItemId)],
+            [
+                new("労務費", group => IfProduced(group, () => CellText.Integer(group.Sum(entry => entry.Result.LaborCost!.Value)), string.Empty)),
+                new("予算額の初期値", group => IfProduced(group, () => CellText.Integer(group.Sum(entry => entry.Result.Total!.Value)), CellText.NotProduced)),
+                new("年割の初期値", group => IfProduced(group, () => AllocationsText(group.SelectMany(entry => entry.Result.Allocations)), string.Empty)),
+                new("知らせる内容", group => NoticeText(index, group.SelectMany(entry => entry.Result.MissingUnitRates))),
+            ]);
+    }
 
-    /// <summary>労務費の内訳(例・費用内訳・人員区分か行・年度・人工・単価・労務費)。キーは費用内訳ID。</summary>
-    public static TextTable LaborCosts(PlanData plan, IReadOnlyDictionary<int, BudgetInitialValueResult> results, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+    /// <summary>
+    /// 労務費の内訳(例・費用内訳・人員区分か行・年度・人工・単価・労務費)。キーは費用内訳ID。
+    /// 人員区分の列がある表には、種別ごとの合計の行(「直営」など)と区分ごとの行(「直営・機械」など)を置き、
+    /// それぞれに年度を「合計」とした労務費の合計の行を足す。
+    /// 単価は、1行にまとめた単価がすべて同じときだけ書く。初期値を出さない費用内訳の行は置かない。
+    /// </summary>
+    public static TextTable LaborCosts(PlanData plan, IReadOnlyDictionary<int, BudgetInitialValueResult> results, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("年度"))
+        {
+            throw new ArgumentException("「労務費の内訳」には「年度」の列を置きます。", nameof(columns));
+        }
+
+        var byStaff = columns.Contains("人員区分");
+        if (byStaff && columns.Contains("行"))
+        {
+            throw new ArgumentException("「労務費の内訳」には「人員区分」と「行」のどちらか一方の列を置きます。", nameof(columns));
+        }
+
+        var index = new PlanIndex(plan);
+        var entries = results
+            .Where(pair => pair.Value.IsProduced)
+            .SelectMany(pair => pair.Value.LaborCostEntries.Select(entry => (CostItemId: pair.Key, Entry: entry)))
+            .SelectMany(IEnumerable<LaborCostRow> (pair) =>
+            {
+                var line = index.LaborLines[pair.Entry.LaborLineId];
+                var category = index.StaffCategories[line.StaffCategoryId];
+                var byCategory = new LaborCostRow(pair.CostItemId, line, CellText.StaffCategory(category), StaffOrder(category, isKindTotal: false), pair.Entry.FiscalYear, pair.Entry);
+                if (!byStaff)
+                {
+                    return [byCategory];
+                }
+
+                var byKind = byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffOrder(category, isKindTotal: true) };
+                return [byKind, byKind with { FiscalYear = null }, byCategory, byCategory with { FiscalYear = null }];
+            });
+        return GroupedTable.Build(
+            "労務費の内訳",
+            columns,
+            entries,
+            [
+                ExampleColumn<LaborCostRow>(index, row => row.CostItemId),
+                CostItemColumn<LaborCostRow>(index, row => row.CostItemId),
+                new("人員区分", row => row.Staff, row => row.StaffOrder),
+                new("行", row => CellText.Integer(row.Line.Id), row => row.Line.Id),
+                new("年度", row => row.FiscalYear is { } fiscalYear ? CellText.FiscalYear(fiscalYear) : CellText.Total, row => row.FiscalYear ?? int.MaxValue),
+            ],
+            [
+                new("人工", group => group[0].FiscalYear is null ? string.Empty : CellText.ManDays(group.Sum(row => row.Entry.ManDaysTenths))),
+                new("単価", group => group[0].FiscalYear is null || group.Select(row => row.Entry.UnitRate).Distinct().Count() != 1
+                    ? string.Empty
+                    : CellText.Integer(group[0].Entry.UnitRate)),
+                new("労務費", group => CellText.Integer(group.Sum(row => row.Entry.Cost))),
+            ]);
+    }
 
     /// <summary>山積み(欄・予算額・見積額・実績額・人工)。金額の列は、それぞれの金額の種類で集計した結果から作る。</summary>
     public static TextTable Aggregation(IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns) =>
@@ -174,9 +244,32 @@ public static class ResultTables
         return (costItemId, kind) => rows[RowOf(index.CostItems[costItemId])].Contains(kind);
     }
 
+    /// <summary>行のすべての費用内訳が初期値を出していれば produced を、そうでなければ notProduced を返す。</summary>
+    private static string IfProduced(IReadOnlyList<(int CostItemId, BudgetInitialValueResult Result)> group, Func<string> produced, string notProduced) =>
+        group.All(entry => entry.Result.IsProduced) ? produced() : notProduced;
+
+    /// <summary>年割の初期値。年度ごとに合計し、「2026年度 1603076、2027年度 1731324」の形で書く。</summary>
+    private static string AllocationsText(IEnumerable<FiscalYearAmount> allocations) =>
+        string.Join("、", allocations
+            .GroupBy(allocation => allocation.FiscalYear)
+            .OrderBy(group => group.Key)
+            .Select(group => $"{CellText.FiscalYear(group.Key)} {CellText.Integer(group.Sum(allocation => allocation.Amount))}"));
+
+    /// <summary>知らせる内容。足りない単価を種別・表示順・年度の順に並べる。なければ「なし」。</summary>
+    private static string NoticeText(PlanIndex index, IEnumerable<MissingUnitRate> missing)
+    {
+        var items = BudgetInitialValue.OrderMissingUnitRates(missing, index.StaffCategories.Values)
+            .Select(rate => $"{CellText.StaffCategory(index.StaffCategories[rate.StaffCategoryId])}の{CellText.FiscalYear(rate.FiscalYear)}")
+            .ToList();
+        return items.Count == 0 ? CellText.None : $"足りない単価:{string.Join("、", items)}";
+    }
+
     /// <summary>月ごとの値の表の項目。金額(Kind が金額の種類)か人工(Kind が null)のどちらか。</summary>
     private sealed record MonthlyValueEntry(int CostItemId, Slot Slot, AmountKind? Kind, long Amount, long ManDaysTenths);
 
     /// <summary>人工の月ごとの内訳の表の項目。Staff は人員区分の列に書く文字。</summary>
     private sealed record ManDaysEntry(LaborLine Line, Slot Slot, long ManDaysTenths, string Staff, IComparable StaffOrder);
+
+    /// <summary>労務費の内訳の表の項目。Staff は人員区分の列に書く文字。FiscalYear が null なら合計の行。</summary>
+    private sealed record LaborCostRow(int CostItemId, LaborLine Line, string Staff, IComparable StaffOrder, int? FiscalYear, LaborCostEntry Entry);
 }
