@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MaintPlan.Cli/MaintPlan.Cli.csproj" />
+    <Project Path="src/MaintPlan.Core/MaintPlan.Core.csproj" />
+    <Project Path="src/MaintPlan.IO/MaintPlan.IO.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MaintPlan.Tests/MaintPlan.Tests.csproj" />
+  </Folder>
+</Solution>
