@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MaintPlan.Core\MaintPlan.Core.csproj" />
+    <ProjectReference Include="..\MaintPlan.IO\MaintPlan.IO.csproj" />
+  </ItemGroup>
+
+</Project>
