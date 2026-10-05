@@ -1,3 +1,4 @@
+using System.Globalization;
 using MaintPlan.Core.Model;
 using MaintPlan.IO.Csv;
 
@@ -16,7 +17,7 @@ public sealed record TestCase(string Id, string DirectoryPath, IReadOnlyDictiona
         [.. Directory.EnumerateFiles(ExpectedDirectory, "*.csv").Select(Path.GetFileName).OfType<string>().Order(StringComparer.Ordinal)];
 
     /// <summary>集計基準日。</summary>
-    public DateOnly BaseDate => DateOnly.ParseExact(Require("集計基準日"), "yyyy-MM-dd");
+    public DateOnly BaseDate => DateOnly.ParseExact(Require("集計基準日"), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None);
 
     /// <summary>山積みに含める状態。</summary>
     public IReadOnlySet<WorkStatus> Statuses => ParseList<WorkStatus>(Require("含める状態"));

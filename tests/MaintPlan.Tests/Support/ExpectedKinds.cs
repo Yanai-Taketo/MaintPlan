@@ -8,9 +8,9 @@ namespace MaintPlan.Tests.Support;
 /// <summary>期待値の列の値の形。比べるときは Normalize した値で比べる。</summary>
 public sealed record ColumnType(string Description, Func<string, bool> IsValid, Func<string, string> Normalize, Func<string, bool> IsZero)
 {
-    private static readonly Regex IntegerPattern = new(@"^-?[0-9]+$");
+    private static readonly Regex IntegerPattern = new(@"^-?[0-9]+\z");
 
-    private static readonly Regex TenthsPattern = new(@"^[0-9]+\.[0-9]$");
+    private static readonly Regex TenthsPattern = new(@"^[0-9]+\.[0-9]\z");
 
     /// <summary>決まった形の文字列。空欄を0とみなす。</summary>
     public static ColumnType Text(string description, string pattern)
@@ -69,25 +69,26 @@ public static class ExpectedKinds
 {
     private const string FiscalYearLabel = @"[0-9]{4}年度";
 
-    private static readonly ColumnType Example = ColumnType.Text("「例1」「例12A」などの例の名前", @"^例[0-9]+[A-Z]?$");
+    private static readonly ColumnType Example = ColumnType.Text("「例1」「例12A」などの例の名前", @"^例[0-9]+[A-Z]?\z");
     private static readonly ColumnType CostItem = ColumnType.OneOf(Labels.All<CostCategory>());
-    private static readonly ColumnType Slot = ColumnType.Text("YYYY-MM、「YYYY年度 時期未定」、「年度のない時期未定」のどれか", $@"^([0-9]{{4}}-(0[1-9]|1[0-2])|{FiscalYearLabel} 時期未定|年度のない時期未定)$");
-    private static readonly ColumnType Month = ColumnType.Text("YYYY-MM", @"^[0-9]{4}-(0[1-9]|1[0-2])$");
-    private static readonly ColumnType FiscalYearOrTotal = ColumnType.Text("「YYYY年度」か「合計」", $@"^({FiscalYearLabel}|合計)$");
-    private static readonly ColumnType FiscalYear = ColumnType.Text("「YYYY年度」", $@"^{FiscalYearLabel}$");
-    private static readonly ColumnType Staff = ColumnType.Text("「直営」「協力会社」か「直営・機械」などの種別・区分名", @"^(直営|協力会社)(・.+)?$");
-    private static readonly ColumnType LaborLine = ColumnType.Text("作業明細のID", @"^[0-9]+$");
-    private static readonly ColumnType AggregationColumn = ColumnType.Text("「YYYY年度 1Q」〜「YYYY年度 4Q」、「YYYY年度 時期未定」、「YYYY年度 合計」、「年度のない時期未定」のどれか", $@"^({FiscalYearLabel} ([1-4]Q|時期未定|合計)|年度のない時期未定)$");
-    private static readonly ColumnType FiscalYearCategory = ColumnType.Text("「YYYY年度 修繕費」などの年度と費用区分", $@"^{FiscalYearLabel} (修繕費|設備投資)$");
+    private static readonly ColumnType Slot = ColumnType.Text("YYYY-MM、「YYYY年度 時期未定」、「年度のない時期未定」のどれか", $@"^([0-9]{{4}}-(0[1-9]|1[0-2])|{FiscalYearLabel} 時期未定|年度のない時期未定)\z");
+    private static readonly ColumnType Month = ColumnType.Text("YYYY-MM", @"^[0-9]{4}-(0[1-9]|1[0-2])\z");
+    private static readonly ColumnType FiscalYearOrTotal = ColumnType.Text("「YYYY年度」か「合計」", $@"^({FiscalYearLabel}|合計)\z");
+    private static readonly ColumnType FiscalYear = ColumnType.Text("「YYYY年度」", $@"^{FiscalYearLabel}\z");
+    private static readonly ColumnType Staff = ColumnType.Text("「直営」「協力会社」か「直営・機械」などの種別・区分名", @"^(直営|協力会社)(・.+)?\z");
+    private static readonly ColumnType LaborLine = ColumnType.Text("作業明細のID", @"^[0-9]+\z");
+    private static readonly ColumnType AggregationColumn = ColumnType.Text("「YYYY年度 1Q」〜「YYYY年度 4Q」、「YYYY年度 時期未定」、「YYYY年度 合計」、「年度のない時期未定」のどれか", $@"^({FiscalYearLabel} ([1-4]Q|時期未定|合計)|年度のない時期未定)\z");
+    private static readonly ColumnType FiscalYearCategory = ColumnType.Text("「YYYY年度 修繕費」などの年度と費用区分", $@"^{FiscalYearLabel} (修繕費|設備投資)\z");
     private static readonly ColumnType AmountKindType = ColumnType.OneOf(Labels.All<AmountKind>());
     private static readonly ColumnType Amount = ColumnType.Integer();
     private static readonly ColumnType AmountOrMissing = ColumnType.Integer("未入力");
-    private static readonly ColumnType Count = ColumnType.Text("0以上の整数", @"^[0-9]+$");
+    private static readonly Regex NonNegativeInteger = new(@"^[0-9]+\z");
+    private static readonly ColumnType Count = ColumnType.Integer() with { Description = "0以上の整数", IsValid = NonNegativeInteger.IsMatch };
 
     public static IReadOnlyList<ExpectedKind> All { get; } =
     [
         new("月ごとの日数",
-            [new("年月", ColumnType.Text("YYYY-MM か「合計」", @"^([0-9]{4}-(0[1-9]|1[0-2])|合計)$"), Required: true)],
+            [new("年月", ColumnType.Text("YYYY-MM か「合計」", @"^([0-9]{4}-(0[1-9]|1[0-2])|合計)\z"), Required: true)],
             new Dictionary<string, ColumnType> { ["日数"] = Count }),
         new("月ごとの値",
             [new("例", Example), new("費用内訳", CostItem), new("年月", Slot, Required: true)],
@@ -105,7 +106,7 @@ public static class ExpectedKinds
             {
                 ["労務費"] = Amount,
                 ["予算額の初期値"] = ColumnType.Integer("出さない"),
-                ["年割の初期値"] = ColumnType.Text("「2026年度 1603076、2027年度 1731324」の形", $@"^{FiscalYearLabel} -?[0-9]+(、{FiscalYearLabel} -?[0-9]+)*$"),
+                ["年割の初期値"] = ColumnType.Text("「2026年度 1603076、2027年度 1731324」の形", $@"^{FiscalYearLabel} -?[0-9]+(、{FiscalYearLabel} -?[0-9]+)*\z"),
                 ["知らせる内容"] = ColumnType.AnyText,
             }),
         new("労務費の内訳",
@@ -123,7 +124,7 @@ public static class ExpectedKinds
             new Dictionary<string, ColumnType>
             {
                 ["件数"] = Count,
-                ["対象"] = ColumnType.Text("「例3」「例12D」などを「、」でつないだもの", @"^例[0-9]+[A-Z]?(、例[0-9]+[A-Z]?)*$"),
+                ["対象"] = ColumnType.Text("「例3」「例12D」などを「、」でつないだもの", @"^例[0-9]+[A-Z]?(、例[0-9]+[A-Z]?)*\z"),
             }),
         new("残予算と見込み残",
             [new("年度・費用区分", FiscalYearCategory, Required: true)],

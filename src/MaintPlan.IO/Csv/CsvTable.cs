@@ -15,7 +15,7 @@ public sealed record CsvTable(string FilePath, IReadOnlyList<string> Columns, IR
         {
             DetectColumnCountChanges = true,
             BadDataFound = args => throw new CsvFormatException(
-                filePath, args.Context.Parser?.RawRow, null, $"CSV の形が正しくありません: {args.RawRecord}"),
+                filePath, args.Context.Parser is { } parser ? StartLine(parser) : null, null, $"CSV の形が正しくありません: {args.RawRecord}"),
         };
 
         using var reader = new StreamReader(filePath, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true);
@@ -43,15 +43,22 @@ public sealed record CsvTable(string FilePath, IReadOnlyList<string> Columns, IR
                     cells[index] = csv.GetField(index) ?? string.Empty;
                 }
 
-                rows.Add(new CsvTableRow(csv.Parser.RawRow, cells));
+                rows.Add(new CsvTableRow(StartLine(csv.Parser), cells));
             }
         }
         catch (BadDataException exception)
         {
-            throw new CsvFormatException(filePath, exception.Context?.Parser?.RawRow, null, "列の数が列名の行と合いません。");
+            throw new CsvFormatException(filePath, exception.Context?.Parser is { } parser ? StartLine(parser) : null, null, "列の数が列名の行と合いません。");
         }
 
         return new CsvTable(filePath, header, rows);
+    }
+
+    /// <summary>レコードが始まる行の番号。セルの中に改行があるレコードは、複数の行にまたがる。</summary>
+    private static int StartLine(IParser parser)
+    {
+        var record = parser.RawRecord.TrimEnd('\r', '\n');
+        return parser.RawRow - record.Count(character => character == '\n');
     }
 
     /// <summary>列の位置。なければ -1。</summary>

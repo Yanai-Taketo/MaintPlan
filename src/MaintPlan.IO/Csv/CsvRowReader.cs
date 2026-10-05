@@ -16,7 +16,7 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row)
     public long Amount(string column) => Required(column, OptionalAmount);
 
     public long? OptionalAmount(string column) =>
-        Parse<long>(column, text => AmountPattern().IsMatch(text) ? long.Parse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture) : null, "桁区切りのない整数");
+        Parse<long>(column, text => AmountPattern().IsMatch(text) && long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var value) ? value : null, "桁区切りのない整数");
 
     /// <summary>小数点以下1桁までの数を、10倍した整数で返す。</summary>
     public long Tenths(string column) =>
@@ -91,17 +91,21 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row)
             return null;
         }
 
-        var whole = long.Parse(match.Groups["whole"].Value, CultureInfo.InvariantCulture);
+        if (!long.TryParse(match.Groups["whole"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var whole) || whole > (long.MaxValue - 9) / 10)
+        {
+            return null;
+        }
+
         var tenth = match.Groups["tenth"].Success ? match.Groups["tenth"].Value[0] - '0' : 0;
         return whole * 10 + tenth;
     }
 
-    [GeneratedRegex(@"^-?[0-9]+$")]
+    [GeneratedRegex(@"^-?[0-9]+\z")]
     private static partial Regex AmountPattern();
 
-    [GeneratedRegex(@"^[0-9]{4}$")]
+    [GeneratedRegex(@"^[0-9]{4}\z")]
     private static partial Regex FiscalYearPattern();
 
-    [GeneratedRegex(@"^(?<whole>[0-9]+)(\.(?<tenth>[0-9]))?$")]
+    [GeneratedRegex(@"^(?<whole>[0-9]+)(\.(?<tenth>[0-9]))?\z")]
     private static partial Regex TenthsPattern();
 }
