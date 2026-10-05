@@ -10,7 +10,7 @@ public sealed record ColumnType(string Description, Func<string, bool> IsValid, 
 {
     private static readonly Regex IntegerPattern = new(@"^-?[0-9]+\z");
 
-    private static readonly Regex TenthsPattern = new(@"^[0-9]+\.[0-9]\z");
+    private static readonly Regex TenthsPattern = new(@"^[0-9]+(\.[0-9])?\z");
 
     /// <summary>決まった形の文字列。空欄を0とみなす。</summary>
     public static ColumnType Text(string description, string pattern)
@@ -36,9 +36,9 @@ public sealed record ColumnType(string Description, Func<string, bool> IsValid, 
             text => text.Length == 0 || (IntegerPattern.IsMatch(text) && long.Parse(text, CultureInfo.InvariantCulture) == 0));
     }
 
-    /// <summary>小数点以下1桁の数(人工)。</summary>
+    /// <summary>小数点以下1桁までの数(人工)。</summary>
     public static ColumnType Tenths { get; } = new(
-        "小数点以下1桁の数",
+        "小数点以下1桁までの数",
         TenthsPattern.IsMatch,
         text => TenthsPattern.IsMatch(text) ? decimal.Parse(text, CultureInfo.InvariantCulture).ToString("0.0", CultureInfo.InvariantCulture) : text,
         text => text.Length == 0 || (TenthsPattern.IsMatch(text) && decimal.Parse(text, CultureInfo.InvariantCulture) == 0));

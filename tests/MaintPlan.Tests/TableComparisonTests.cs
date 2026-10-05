@@ -54,6 +54,15 @@ public sealed class TableComparisonTests : IDisposable
     }
 
     [Fact]
+    public void ManDays_written_without_decimal_matches_one_decimal()
+    {
+        var expected = Expected("月ごとの値.csv", "費用内訳,年月,人工", "設備投資,2027-09,0", "設備投資,2027-06,6.0");
+        var actual = Actual(["費用内訳", "年月", "人工"], ["設備投資", "2027-09", "0.0"], ["設備投資", "2027-06", "6.0"]);
+
+        Assert.Empty(TableComparison.Compare(expected, actual));
+    }
+
+    [Fact]
     public void Missing_nonzero_row_is_reported()
     {
         var expected = Expected("山積み.csv", "欄,予算額", "2027年度 1Q,900000");
@@ -110,6 +119,7 @@ public sealed class TableComparisonTests : IDisposable
     [Theory]
     [InlineData("月ごとの値.csv", "例,年月,予算額", "例1,2027-02,\"609,168\"")]
     [InlineData("月ごとの値.csv", "例,年月,人工", "例1,2027-02,8.75")]
+    [InlineData("月ごとの値.csv", "例,年月,人工", "例1,2027-02,8.")]
     [InlineData("月ごとの値.csv", "例,年月,金額", "例1,2027-02,100")]
     [InlineData("月ごとの値.csv", "例,予算額", "例1,100")]
     [InlineData("月ごとの値.csv", "例,年月,予算額", ",2027-02,100")]
