@@ -182,17 +182,98 @@ public static class ResultTables
             ]);
     }
 
-    /// <summary>山積み(欄・予算額・見積額・実績額・人工)。金額の列は、それぞれの金額の種類で集計した結果から作る。</summary>
-    public static TextTable Aggregation(IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+    /// <summary>
+    /// 山積み(欄・予算額・見積額・実績額・人工)。金額の列は、それぞれの金額の種類で集計した結果から作る。行は、どれかの結果にある欄ごとに置く。
+    /// 人工は金額の種類によらないため、渡された結果のどれから取っても同じになる。食い違うときは、集計の条件の違う結果が渡されたものとして例外にする。
+    /// </summary>
+    public static TextTable Aggregation(IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("欄"))
+        {
+            throw new ArgumentException("「山積み」には「欄」の列を置きます。", nameof(columns));
+        }
 
-    /// <summary>山積みの人工の内訳(欄・人員区分・人工)。</summary>
-    public static TextTable LaborBreakdown(PlanData plan, AggregationResult result, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+        var absent = Enum.GetValues<AmountKind>().Where(kind => columns.Contains(Labels.Of(kind)) && !results.ContainsKey(kind)).ToList();
+        if (absent.Count > 0)
+        {
+            throw new ArgumentException($"列「{string.Join("」「", absent.Select(Labels.Of))}」の金額の種類で集計した結果がありません。", nameof(results));
+        }
 
-    /// <summary>未入力の件数(金額の種類・件数・対象)。</summary>
-    public static TextTable MissingAmounts(PlanData plan, IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+        var manDays = results
+            .OrderBy(pair => pair.Key)
+            .Select(pair => pair.Value.Cells.ToDictionary(cell => cell.Column, cell => cell.ManDaysTenths))
+            .ToList();
+        var reference = manDays.FirstOrDefault() ?? [];
+        if (manDays.Skip(1).Any(other => other.Keys.Union(reference.Keys).Any(column => other.GetValueOrDefault(column) != reference.GetValueOrDefault(column))))
+        {
+            throw new ArgumentException("金額の種類ごとの結果で、人工が食い違っています。集計の条件(状態・費用区分)が同じ結果を渡します。", nameof(results));
+        }
+
+        return GroupedTable.Build(
+            "山積み",
+            columns,
+            results.SelectMany(pair => pair.Value.Cells.Select(cell => new AggregationEntry(pair.Key, cell))),
+            [new("欄", entry => CellText.AggregationColumn(entry.Cell.Column), entry => CellText.AggregationColumnOrder(entry.Cell.Column))],
+            [
+                .. Enum.GetValues<AmountKind>().Select(kind => new ValueColumn<AggregationEntry>(
+                    Labels.Of(kind),
+                    group => CellText.Integer(group.Where(entry => entry.Kind == kind).Sum(entry => entry.Cell.Amount)))),
+                new("人工", group => CellText.ManDays(reference.GetValueOrDefault(group[0].Cell.Column))),
+            ]);
+    }
+
+    /// <summary>
+    /// 山積みの人工の内訳(欄・人員区分・人工)。
+    /// 人員区分の列には、種別ごとの合計の行(「直営」など)と、区分ごとの行(「直営・機械」など)の両方を置く。
+    /// </summary>
+    public static TextTable LaborBreakdown(PlanData plan, AggregationResult result, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("欄") || !columns.Contains("人員区分"))
+        {
+            throw new ArgumentException("「人工の内訳」には「欄」と「人員区分」の列を置きます。", nameof(columns));
+        }
+
+        var index = new PlanIndex(plan);
+        return GroupedTable.Build(
+            "人工の内訳",
+            columns,
+            result.LaborBreakdown,
+            [
+                new("欄", cell => CellText.AggregationColumn(cell.Column), cell => CellText.AggregationColumnOrder(cell.Column)),
+                new("人員区分",
+                    cell => cell.StaffCategoryId is { } id ? CellText.StaffCategory(index.StaffCategories[id]) : CellText.StaffKind(cell.StaffKind),
+                    cell => cell.StaffCategoryId is { } id ? StaffOrder(index.StaffCategories[id], isKindTotal: false) : StaffOrder(cell.StaffKind)),
+            ],
+            [new("人工", group => CellText.ManDays(group.Sum(cell => cell.ManDaysTenths)))]);
+    }
+
+    /// <summary>
+    /// 未入力の件数(金額の種類・件数・対象)。予算額と見積額の結果ごとに、0件でも1行置く。実績額は未入力にならないため、行を置かない。
+    /// 件数は未入力の費用内訳の数とし、対象は、その費用内訳の工事の管理番号を、工事の順に重複なしで「、」でつなぐ。
+    /// </summary>
+    public static TextTable MissingAmounts(PlanData plan, IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("金額の種類"))
+        {
+            throw new ArgumentException("「未入力の件数」には「金額の種類」の列を置きます。", nameof(columns));
+        }
+
+        var index = new PlanIndex(plan);
+        return GroupedTable.Build(
+            "未入力の件数",
+            columns,
+            results.Where(pair => pair.Key is AmountKind.Budget or AmountKind.Estimate),
+            [new("金額の種類", pair => Labels.Of(pair.Key), pair => pair.Key)],
+            [
+                new("件数", group => CellText.Integer(group.Sum(pair => pair.Value.MissingAmountCostItemIds.Count))),
+                new("対象", group => string.Join("、", group
+                    .SelectMany(pair => pair.Value.MissingAmountCostItemIds)
+                    .Select(index.WorkOf)
+                    .DistinctBy(work => work.Id)
+                    .OrderBy(work => work.Id)
+                    .Select(work => work.ManagementNumber))),
+            ]);
+    }
 
     /// <summary>残予算と見込み残(年度・費用区分・予算枠・実績額・残予算・未実績見込み・見込み残)。</summary>
     public static TextTable RemainingBudget(RemainingBudgetResult result, IReadOnlyList<string> columns) =>
@@ -216,7 +297,9 @@ public static class ResultTables
         new("年月", entry => CellText.Slot(slot(entry)), entry => CellText.SlotOrder(slot(entry)));
 
     private static IComparable StaffOrder(StaffCategory category, bool isKindTotal) =>
-        (category.Kind, !isKindTotal, isKindTotal ? 0 : category.DisplayOrder, isKindTotal ? 0 : category.Id);
+        isKindTotal ? StaffOrder(category.Kind) : (category.Kind, true, category.DisplayOrder, category.Id);
+
+    private static IComparable StaffOrder(StaffKind kind) => (kind, false, 0, 0);
 
     /// <summary>予算額か見積額のセル。行がすべて未入力なら「未入力」、そうでなければ合計。</summary>
     private static string AmountOrMissing(IReadOnlyList<MonthlyValueEntry> group, AmountKind kind, Func<int, AmountKind, bool> isRowMissing) =>
@@ -263,6 +346,9 @@ public static class ResultTables
             .ToList();
         return items.Count == 0 ? CellText.None : $"足りない単価:{string.Join("、", items)}";
     }
+
+    /// <summary>山積みの表の項目。Kind の金額の種類で集計した結果の欄。</summary>
+    private sealed record AggregationEntry(AmountKind Kind, AggregationCell Cell);
 
     /// <summary>月ごとの値の表の項目。金額(Kind が金額の種類)か人工(Kind が null)のどちらか。</summary>
     private sealed record MonthlyValueEntry(int CostItemId, Slot Slot, AmountKind? Kind, long Amount, long ManDaysTenths);

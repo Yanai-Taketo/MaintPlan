@@ -90,12 +90,45 @@ public sealed record AggregationCondition(
     IReadOnlySet<WorkStatus> Statuses,
     IReadOnlySet<CostCategory> Categories);
 
-/// <summary>山積みの欄。四半期、年度の時期未定、年度のない時期未定のどれか。</summary>
-public readonly record struct AggregationColumn(int? FiscalYear, int? Quarter)
+/// <summary>山積みの欄。四半期、年度の時期未定、年度のない時期未定、年度の合計のどれか。</summary>
+public readonly record struct AggregationColumn
 {
-    public static AggregationColumn OfQuarter(int fiscalYear, int quarter) => new(fiscalYear, quarter);
+    private AggregationColumn(AggregationColumnKind kind, int? fiscalYear, int? quarter)
+    {
+        Kind = kind;
+        FiscalYear = fiscalYear;
+        Quarter = quarter;
+    }
 
-    public static AggregationColumn Undetermined(int? fiscalYear) => new(fiscalYear, null);
+    public AggregationColumnKind Kind { get; }
+
+    /// <summary>欄の年度。年度のない時期未定なら null。</summary>
+    public int? FiscalYear { get; }
+
+    /// <summary>四半期(1〜4)。四半期の欄でなければ null。</summary>
+    public int? Quarter { get; }
+
+    public static AggregationColumn OfQuarter(int fiscalYear, int quarter)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(quarter, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(quarter, 4);
+        return new(AggregationColumnKind.Quarter, fiscalYear, quarter);
+    }
+
+    public static AggregationColumn Undetermined(int? fiscalYear) => new(AggregationColumnKind.Undetermined, fiscalYear, null);
+
+    public static AggregationColumn FiscalYearTotal(int fiscalYear) => new(AggregationColumnKind.FiscalYearTotal, fiscalYear, null);
+}
+
+/// <summary>山積みの欄の種類。年度の中では、この順に並べる。</summary>
+public enum AggregationColumnKind
+{
+    /// <summary>四半期(1Q〜4Q)</summary>
+    Quarter,
+    /// <summary>時期未定</summary>
+    Undetermined,
+    /// <summary>年度の合計(1Q〜4Qと、その年度の時期未定の合計)</summary>
+    FiscalYearTotal,
 }
 
 /// <summary>山積みの集計の結果。</summary>
@@ -107,8 +140,8 @@ public sealed record AggregationResult(
 /// <summary>山積みの欄ごとの金額と人工(10倍した整数)。</summary>
 public sealed record AggregationCell(AggregationColumn Column, long Amount, long ManDaysTenths);
 
-/// <summary>山積みの欄・人員区分ごとの人工(10倍した整数)。</summary>
-public sealed record LaborBreakdownCell(AggregationColumn Column, int StaffCategoryId, long ManDaysTenths);
+/// <summary>山積みの欄・人員区分ごとの人工(10倍した整数)。StaffCategoryId が null なら、種別ごとの合計。</summary>
+public sealed record LaborBreakdownCell(AggregationColumn Column, StaffKind StaffKind, int? StaffCategoryId, long ManDaysTenths);
 
 /// <summary>残予算と見込み残の計算結果。</summary>
 public sealed record RemainingBudgetResult(
