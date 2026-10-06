@@ -275,13 +275,54 @@ public static class ResultTables
             ]);
     }
 
-    /// <summary>残予算と見込み残(年度・費用区分・予算枠・実績額・残予算・未実績見込み・見込み残)。</summary>
-    public static TextTable RemainingBudget(RemainingBudgetResult result, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+    /// <summary>
+    /// 残予算と見込み残(年度・費用区分・予算枠・実績額・残予算・未実績見込み・見込み残)。
+    /// 予算枠が登録されていない行は、予算枠を「0(未登録)」と書く。
+    /// </summary>
+    public static TextTable RemainingBudget(RemainingBudgetResult result, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("年度・費用区分"))
+        {
+            throw new ArgumentException("「残予算と見込み残」には「年度・費用区分」の列を置きます。", nameof(columns));
+        }
+
+        return GroupedTable.Build(
+            "残予算と見込み残",
+            columns,
+            result.Rows,
+            [new("年度・費用区分", row => CellText.FiscalYearCategory(row.FiscalYear, row.Category), row => (row.FiscalYear, row.Category))],
+            [
+                new("予算枠", group => group[0].IsBudgetFrameRegistered ? CellText.Integer(group[0].BudgetFrame) : CellText.Unregistered),
+                new("実績額", group => CellText.Integer(group[0].Actual)),
+                new("残予算", group => CellText.Integer(group[0].Remaining)),
+                new("未実績見込み", group => CellText.Integer(group[0].Unrealized)),
+                new("見込み残", group => CellText.Integer(group[0].Projected)),
+            ]);
+    }
 
     /// <summary>未実績見込みの内訳(例・費用内訳・年度・年度配分・未実績見込み)。</summary>
-    public static TextTable UnrealizedBreakdown(PlanData plan, RemainingBudgetResult result, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+    public static TextTable UnrealizedBreakdown(PlanData plan, RemainingBudgetResult result, IReadOnlyList<string> columns)
+    {
+        if (!columns.Contains("年度"))
+        {
+            throw new ArgumentException("「未実績見込みの内訳」には「年度」の列を置きます。", nameof(columns));
+        }
+
+        var index = new PlanIndex(plan);
+        return GroupedTable.Build(
+            "未実績見込みの内訳",
+            columns,
+            result.UnrealizedEntries,
+            [
+                ExampleColumn<UnrealizedEntry>(index, entry => entry.CostItemId),
+                CostItemColumn<UnrealizedEntry>(index, entry => entry.CostItemId),
+                new("年度", entry => CellText.FiscalYear(entry.FiscalYear), entry => entry.FiscalYear),
+            ],
+            [
+                new("年度配分", group => CellText.Integer(group.Sum(entry => entry.Allocation))),
+                new("未実績見込み", group => CellText.Integer(group.Sum(entry => entry.Unrealized))),
+            ]);
+    }
 
     /// <summary>保存の確認(保存できる・理由の種類)。</summary>
     public static TextTable SaveValidation(SaveValidationResult result, IReadOnlyList<string> columns) =>

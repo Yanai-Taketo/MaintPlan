@@ -19,6 +19,9 @@ internal static class CellText
     /// <summary>知らせる内容がないときに書く文字。</summary>
     public const string None = "なし";
 
+    /// <summary>予算枠が登録されていない年度・費用区分の予算枠に書く文字。</summary>
+    public const string Unregistered = "0(未登録)";
+
     /// <summary>金額や日数。桁区切りなしの整数。</summary>
     public static string Integer(long value) => value.ToString(CultureInfo.InvariantCulture);
 
@@ -55,6 +58,9 @@ internal static class CellText
     /// <summary>山積みの欄を並べる順。年度ごとに1Q〜4Q、時期未定、合計の順とし、年度のない時期未定の欄を最後に置く。</summary>
     public static IComparable AggregationColumnOrder(AggregationColumn column) =>
         (column.FiscalYear ?? int.MaxValue, column.Kind, column.Quarter ?? 0);
+
+    /// <summary>「2026年度 修繕費」の形の年度と費用区分。</summary>
+    public static string FiscalYearCategory(int fiscalYear, CostCategory category) => $"{FiscalYear(fiscalYear)} {Labels.Of(category)}";
 
     /// <summary>「YYYY年度」。</summary>
     public static string FiscalYear(int fiscalYear) => string.Create(CultureInfo.InvariantCulture, $"{fiscalYear}年度");
