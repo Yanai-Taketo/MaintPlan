@@ -90,17 +90,22 @@ public sealed record AggregationCondition(
     IReadOnlySet<WorkStatus> Statuses,
     IReadOnlySet<CostCategory> Categories);
 
-/// <summary>山積みの欄。四半期、年度の時期未定、年度のない時期未定、年度の合計のどれか。</summary>
+/// <summary>山積みの欄。四半期、年度の時期未定、年度のない時期未定、年度の合計のどれか。既定値は年度のない時期未定。</summary>
 public readonly record struct AggregationColumn
 {
-    private AggregationColumn(AggregationColumnKind kind, int? fiscalYear, int? quarter)
+    private readonly bool isFiscalYearTotal;
+
+    private AggregationColumn(int? fiscalYear, int? quarter, bool isFiscalYearTotal)
     {
-        Kind = kind;
         FiscalYear = fiscalYear;
         Quarter = quarter;
+        this.isFiscalYearTotal = isFiscalYearTotal;
     }
 
-    public AggregationColumnKind Kind { get; }
+    public AggregationColumnKind Kind =>
+        Quarter is not null ? AggregationColumnKind.Quarter
+        : isFiscalYearTotal ? AggregationColumnKind.FiscalYearTotal
+        : AggregationColumnKind.Undetermined;
 
     /// <summary>欄の年度。年度のない時期未定なら null。</summary>
     public int? FiscalYear { get; }
@@ -112,12 +117,12 @@ public readonly record struct AggregationColumn
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(quarter, 1);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(quarter, 4);
-        return new(AggregationColumnKind.Quarter, fiscalYear, quarter);
+        return new(fiscalYear, quarter, isFiscalYearTotal: false);
     }
 
-    public static AggregationColumn Undetermined(int? fiscalYear) => new(AggregationColumnKind.Undetermined, fiscalYear, null);
+    public static AggregationColumn Undetermined(int? fiscalYear) => new(fiscalYear, null, isFiscalYearTotal: false);
 
-    public static AggregationColumn FiscalYearTotal(int fiscalYear) => new(AggregationColumnKind.FiscalYearTotal, fiscalYear, null);
+    public static AggregationColumn FiscalYearTotal(int fiscalYear) => new(fiscalYear, null, isFiscalYearTotal: true);
 }
 
 /// <summary>山積みの欄の種類。年度の中では、この順に並べる。</summary>
