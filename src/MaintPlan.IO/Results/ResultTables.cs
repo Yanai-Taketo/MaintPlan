@@ -64,9 +64,9 @@ public static class ResultTables
         {
             var line = index.LaborLines[manDays.LaborLineId];
             var category = index.StaffCategories[line.StaffCategoryId];
-            var byCategory = new ManDaysEntry(line, manDays.Slot, manDays.ManDaysTenths, CellText.StaffCategory(category), StaffOrder(category, isKindTotal: false));
+            var byCategory = new ManDaysEntry(line, manDays.Slot, manDays.ManDaysTenths, CellText.StaffCategory(category), StaffRowOrder.Of(category));
             return withKindTotal
-                ? [byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffOrder(category, isKindTotal: true) }, byCategory]
+                ? [byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffRowOrder.Of(category.Kind) }, byCategory]
                 : [byCategory];
         });
         return GroupedTable.Build(
@@ -153,13 +153,13 @@ public static class ResultTables
             {
                 var line = index.LaborLines[pair.Entry.LaborLineId];
                 var category = index.StaffCategories[line.StaffCategoryId];
-                var byCategory = new LaborCostRow(pair.CostItemId, line, CellText.StaffCategory(category), StaffOrder(category, isKindTotal: false), pair.Entry.FiscalYear, pair.Entry);
+                var byCategory = new LaborCostRow(pair.CostItemId, line, CellText.StaffCategory(category), StaffRowOrder.Of(category), pair.Entry.FiscalYear, pair.Entry);
                 if (!byStaff)
                 {
                     return [byCategory];
                 }
 
-                var byKind = byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffOrder(category, isKindTotal: true) };
+                var byKind = byCategory with { Staff = CellText.StaffKind(category), StaffOrder = StaffRowOrder.Of(category.Kind) };
                 return [byKind, byKind with { FiscalYear = null }, byCategory, byCategory with { FiscalYear = null }];
             });
         return GroupedTable.Build(
@@ -213,7 +213,7 @@ public static class ResultTables
             "山積み",
             columns,
             results.SelectMany(pair => pair.Value.Cells.Select(cell => new AggregationEntry(pair.Key, cell))),
-            [new("欄", entry => CellText.AggregationColumn(entry.Cell.Column), entry => CellText.AggregationColumnOrder(entry.Cell.Column))],
+            [new("欄", entry => CellText.AggregationColumn(entry.Cell.Column), entry => entry.Cell.Column)],
             [
                 .. Enum.GetValues<AmountKind>().Select(kind => new ValueColumn<AggregationEntry>(
                     Labels.Of(kind),
@@ -239,10 +239,10 @@ public static class ResultTables
             columns,
             result.LaborBreakdown,
             [
-                new("欄", cell => CellText.AggregationColumn(cell.Column), cell => CellText.AggregationColumnOrder(cell.Column)),
+                new("欄", cell => CellText.AggregationColumn(cell.Column), cell => cell.Column),
                 new("人員区分",
                     cell => cell.StaffCategoryId is { } id ? CellText.StaffCategory(index.StaffCategories[id]) : CellText.StaffKind(cell.StaffKind),
-                    cell => cell.StaffCategoryId is { } id ? StaffOrder(index.StaffCategories[id], isKindTotal: false) : StaffOrder(cell.StaffKind)),
+                    cell => cell.StaffCategoryId is { } id ? StaffRowOrder.Of(index.StaffCategories[id]) : StaffRowOrder.Of(cell.StaffKind)),
             ],
             [new("人工", group => CellText.ManDays(group.Sum(cell => cell.ManDaysTenths)))]);
     }
@@ -336,11 +336,6 @@ public static class ResultTables
 
     private static KeyColumn<TEntry> SlotColumn<TEntry>(Func<TEntry, Slot> slot) =>
         new("年月", entry => CellText.Slot(slot(entry)), entry => CellText.SlotOrder(slot(entry)));
-
-    private static IComparable StaffOrder(StaffCategory category, bool isKindTotal) =>
-        isKindTotal ? StaffOrder(category.Kind) : (category.Kind, true, category.DisplayOrder, category.Id);
-
-    private static IComparable StaffOrder(StaffKind kind) => (kind, false, 0, 0);
 
     /// <summary>予算額か見積額のセル。行がすべて未入力なら「未入力」、そうでなければ合計。</summary>
     private static string AmountOrMissing(IReadOnlyList<MonthlyValueEntry> group, AmountKind kind, Func<int, AmountKind, bool> isRowMissing) =>

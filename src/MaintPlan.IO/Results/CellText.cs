@@ -55,10 +55,6 @@ internal static class CellText
         _ => throw new ArgumentOutOfRangeException(nameof(column), column, "山積みの欄ではありません。"),
     };
 
-    /// <summary>山積みの欄を並べる順。年度ごとに1Q〜4Q、時期未定、合計の順とし、年度のない時期未定の欄を最後に置く。</summary>
-    public static IComparable AggregationColumnOrder(AggregationColumn column) =>
-        (column.FiscalYear ?? int.MaxValue, column.Kind, column.Quarter ?? 0);
-
     /// <summary>「2026年度 修繕費」の形の年度と費用区分。</summary>
     public static string FiscalYearCategory(int fiscalYear, CostCategory category) => $"{FiscalYear(fiscalYear)} {Labels.Of(category)}";
 
