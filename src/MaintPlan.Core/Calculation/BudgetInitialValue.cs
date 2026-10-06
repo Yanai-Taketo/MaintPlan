@@ -56,7 +56,7 @@ public static class BudgetInitialValue
             var period = MonthlyAllocation.WorkPeriodOf(work);
             var lines = laborLines[item.Id].ToList();
             var slots = MonthlyAllocation.ManDaysOf(work, period, lines).ToList();
-            var included = lines.Where(line => CategoryOf(line).IncludeInBudget).Select(line => line.Id).ToHashSet();
+            var included = lines.Where(line => CalculationTargets.StaffCategoryOf(line, categories).IncludeInBudget).Select(line => line.Id).ToHashSet();
             if (period is null && work.PlannedFiscalYear is null)
             {
                 return new BudgetInitialValueResult { IsProduced = false };
@@ -98,11 +98,6 @@ public static class BudgetInitialValue
                 LaborCostEntries = entries,
             };
         }
-
-        private StaffCategory CategoryOf(LaborLine line) =>
-            categories.TryGetValue(line.StaffCategoryId, out var category)
-                ? category
-                : throw new InvalidOperationException($"作業明細(ID {line.Id})の人員区分(ID {line.StaffCategoryId})がありません。");
     }
 
     /// <summary>

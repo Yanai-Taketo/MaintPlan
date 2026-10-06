@@ -29,7 +29,7 @@ public static class QuarterlyAggregation
         var manDays = allocation.ManDays
             .Select(entry => (Entry: entry, Line: laborLines[entry.LaborLineId]))
             .Where(pair => items.Contains(pair.Line.CostItemId))
-            .Select(pair => (pair.Entry, Category: CategoryOf(pair.Line, categories)))
+            .Select(pair => (pair.Entry, Category: CalculationTargets.StaffCategoryOf(pair.Line, categories)))
             .ToList();
 
         var cells = amounts
@@ -63,11 +63,6 @@ public static class QuarterlyAggregation
             : AggregationColumn.Undetermined(slot.UndeterminedFiscalYear);
         return slot.FiscalYear is { } fiscalYear ? [column, AggregationColumn.FiscalYearTotal(fiscalYear)] : [column];
     }
-
-    private static StaffCategory CategoryOf(LaborLine line, Dictionary<int, StaffCategory> categories) =>
-        categories.TryGetValue(line.StaffCategoryId, out var category)
-            ? category
-            : throw new InvalidOperationException($"作業明細(ID {line.Id})の人員区分(ID {line.StaffCategoryId})がありません。");
 
     /// <summary>人工の内訳の項目。IsKindTotal なら種別ごとの合計に、そうでなければ区分ごとの値に入れる。</summary>
     private sealed record BreakdownEntry(AggregationColumn Column, StaffCategory Category, bool IsKindTotal, long ManDaysTenths);

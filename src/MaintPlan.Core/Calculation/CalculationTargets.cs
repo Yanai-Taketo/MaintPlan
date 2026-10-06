@@ -29,4 +29,10 @@ public static class CalculationTargets
             _ => new HashSet<int>(),
         };
     }
+
+    /// <summary>作業明細の人員区分。人員区分がなければ例外にする。</summary>
+    internal static StaffCategory StaffCategoryOf(LaborLine line, IReadOnlyDictionary<int, StaffCategory> categories) =>
+        categories.TryGetValue(line.StaffCategoryId, out var category)
+            ? category
+            : throw new InvalidOperationException($"作業明細(ID {line.Id})の人員区分(ID {line.StaffCategoryId})がありません。");
 }
