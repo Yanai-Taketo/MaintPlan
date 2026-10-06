@@ -7,8 +7,10 @@
 - 工程1の段1(ソリューション、CSV の読み込み、例1〜例15のテストデータ)は PR #1、段2(期間の数え方と月への割り振り)は PR #2、段3(予算額の初期値)は PR #3、段4(山積みの集計)は PR #4、段5(残予算と見込み残)は PR #5 で main にマージ済み。
 - 段5まで入れた状態で、`dotnet test` は286件中274件が成功、12件が失敗。失敗はすべて段6の保存の確認のテストで、確認が未実装のため NotImplementedException になる。
 - 段5で、4章の計算(月への割り振り、予算額の初期値、山積みの集計、残予算と見込み残)はそろった。Core に残るのは段6の保存できない条件の確認。
+- 段4のレビューで出た3件(`AggregationColumn` の既定値、並べ順の重複、人員区分を引く処理の重複)は、段とは別の PR #8 で直した。直す前と後で、全ケースの表と Core の結果が、行の順と例外のメッセージまで一致することを確かめた。
+- テストの表の比べ方は、行をキーで突き合わせ、行の順は比べない。また、テストデータの人員区分はどれも表示順が ID の順と同じ。そのため、並べ順の誤りはテストでは見つからない。
 - テストデータの値は、利用者がすべてを確かめられていない。工程1が完成した後の点検で確かめる。
-- 次の作業は、段4のレビューで出た3件を直す小さな PR(下の「工程1の残りの進め方」の1)。その後に段6(保存できない条件の確認)。
+- 次の作業は段6(保存できない条件の確認)。
 
 ## 進め方の決まり
 
@@ -22,7 +24,7 @@
 | 場所 | 中身 |
 | --- | --- |
 | src/MaintPlan.Core/Model | 9つのテーブルの型(Tables.cs)、PlanData、YearMonth、選択項目の enum(Enums.cs)と設計書での呼び名(Labels.cs) |
-| src/MaintPlan.Core/Calculation | 計算と結果の型(Results.cs)。作った段の計算は1つずつファイルに分け(Period、MonthlyAllocation、BudgetInitialValue、QuarterlyAggregation、RemainingBudget)、未実装の入口は Calculators.cs に残す。Proration は暦日の比での割り振り、CalculationTargets は計算の対象の費用内訳と未入力の費用内訳 |
+| src/MaintPlan.Core/Calculation | 計算と結果の型(Results.cs)。作った段の計算は1つずつファイルに分け(Period、MonthlyAllocation、BudgetInitialValue、QuarterlyAggregation、RemainingBudget)、未実装の入口は Calculators.cs に残す。Proration は暦日の比での割り振り、CalculationTargets は計算の対象の費用内訳、未入力の費用内訳、作業明細の人員区分を引く処理(internal の StaffCategoryOf)。StaffRowOrder は人員区分の行の並べ順。山積みの欄の並べ順は AggregationColumn が IComparable として持つ |
 | src/MaintPlan.IO/Csv | 9つのテーブルの CSV の読み込み(PlanCsvReader)と、CSV を表として読む CsvTable |
 | src/MaintPlan.IO/Results | 計算結果を4章の表の形にする ResultTables と TextTable。表は GroupedTable(キーの列で行をまとめて合計する)、CellText(セルの書き方)、PlanIndex(ID から工事・費用内訳などを引く)で作る |
 | src/MaintPlan.Cli | 確認用コンソール。中身は段7で作る |
@@ -52,10 +54,7 @@
 
 ## 工程1の残りの進め方
 
-1. 段6の前に、段4のレビューで出た3件を、段とは別の小さな PR で直す。main から作業ブランチを切り、3件を3つのコミットに分ける。テストと期待値は変えず、直す前と後で全部の表の出力が一致することを確かめて PR に書く。
-   - `AggregationColumn` の既定値:`Kind` をフィールドに持たず、`Quarter` と「年度の合計か」の bool から求める。`default(AggregationColumn)` は `Undetermined(null)`(年度のない時期未定)と等しくなる。公開の形(`Kind`・`FiscalYear`・`Quarter`・3つのファクトリー)と enum の順は変えない。既定値を縛るテストは足さない。
-   - 並べ順の重複:`AggregationColumn` に `IComparable<AggregationColumn>` と、ジェネリックでない `IComparable`(`GroupedTable` の `KeyColumn.Order` が使う)を実装し、`QuarterlyAggregation.OrderOf` と `CellText.AggregationColumnOrder` を削る。人員区分の行の順(種別、種別ごとの合計を先、表示順、ID)は Core に public の静的メソッドとして1か所に置き、`QuarterlyAggregation`・`ResultTables`・`BudgetInitialValue.OrderMissingUnitRates` から使う。名前は `ResultTables` の `StaffOrder` と重ならないもの(`StaffRowOrder` など)にする。
-   - 人員区分を引く処理の重複:`CalculationTargets` に internal の `StaffCategoryOf` を1つ置き、`QuarterlyAggregation` と `BudgetInitialValue` の `CategoryOf` を置き換える。例外の型とメッセージは変えない。
+1. 済み:段4のレビューで出た3件(`AggregationColumn` の既定値、並べ順の重複、人員区分を引く処理の重複)は PR #8 で直した。
 2. 段6は、上の「段6で作るもの」のとおりに作る。
 3. 段7では、8章の作業に加えて次を作る。
    - 読み込み時に、参照先の行があるかを確かめ、ファイルまたはシートと行で示す。対象は、費用内訳の工事ID、予算年割・実績・月別修正・作業明細の費用内訳ID、作業明細と単価の人員区分ID。今の計算は、参照先のない行を例外にせずに対象から外す。
@@ -130,6 +129,5 @@
 
 ## 次に拾う項目
 
-1. 段4のレビューで出た3件を直す小さな PR(「工程1の残りの進め方」の1)。main から作業ブランチを切る。
-2. 段6の着手:main から作業ブランチを切る。
-3. 段7、性質テスト、工程1の完了後の検証(「工程1の残りの進め方」の3〜5)。
+1. 段6の着手:main から作業ブランチを切る。
+2. 段7、性質テスト、工程1の完了後の検証(「工程1の残りの進め方」の3〜5)。
