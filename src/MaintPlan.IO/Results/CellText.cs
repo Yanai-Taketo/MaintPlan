@@ -22,6 +22,12 @@ internal static class CellText
     /// <summary>予算枠が登録されていない年度・費用区分の予算枠に書く文字。</summary>
     public const string Unregistered = "0(未登録)";
 
+    /// <summary>真偽の「はい」。</summary>
+    public const string Yes = "はい";
+
+    /// <summary>真偽の「いいえ」。</summary>
+    public const string No = "いいえ";
+
     /// <summary>金額や日数。桁区切りなしの整数。</summary>
     public static string Integer(long value) => value.ToString(CultureInfo.InvariantCulture);
 

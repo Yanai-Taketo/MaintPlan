@@ -14,7 +14,7 @@ public class CalculationTests
         var expected = ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, fileName));
         var plan = PlanCsvReader.ReadFolder(testCase.InputDirectory);
 
-        var actual = ActualTables.Build(expected.Kind, testCase, plan, expected.Columns);
+        var actual = ActualTables.Build(expected.Kind, testCase, plan, expected.ResultColumns);
 
         var differences = TableComparison.Compare(expected, actual);
         Assert.True(differences.Count == 0, string.Join(Environment.NewLine, differences));
