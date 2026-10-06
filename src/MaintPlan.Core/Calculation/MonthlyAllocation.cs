@@ -48,7 +48,7 @@ public static class MonthlyAllocation
         DatesOf(work.StartDate, work.EndDate, $"工事(ID {work.Id})") is { } dates ? Period.DaysByMonth(dates.Start, dates.End) : null;
 
     /// <summary>開始日と終了日。両方空欄なら null。片方だけのときと、終了日が開始日より前のときは例外にする。</summary>
-    private static (DateOnly Start, DateOnly End)? DatesOf(DateOnly? start, DateOnly? end, string target) => (start, end) switch
+    internal static (DateOnly Start, DateOnly End)? DatesOf(DateOnly? start, DateOnly? end, string target) => (start, end) switch
     {
         ({ } s, { } e) when e < s => throw new InvalidOperationException($"{target}の終了日が開始日より前です。"),
         ({ } s, { } e) => (s, e),
@@ -60,7 +60,7 @@ public static class MonthlyAllocation
     /// 月別修正を、計算に使うものと使わないものに分ける。計算に使うものは、金額の種類ごとに「年月 → 金額」で返す。
     /// 完成工事高の費用内訳の修正と、工期に入らない月の修正(工事の日付が空欄なら、すべての修正)は計算に使わない。
     /// </summary>
-    private static (Dictionary<AmountKind, Dictionary<YearMonth, long>> Usable, List<UnusedOverride> Unused) SplitOverrides(
+    internal static (Dictionary<AmountKind, Dictionary<YearMonth, long>> Usable, List<UnusedOverride> Unused) SplitOverrides(
         CostItem item, IReadOnlyList<MonthDays>? period, IEnumerable<MonthlyOverride> monthlyOverrides)
     {
         var usable = new Dictionary<AmountKind, Dictionary<YearMonth, long>>

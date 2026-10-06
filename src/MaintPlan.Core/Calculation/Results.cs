@@ -185,8 +185,17 @@ public sealed record SaveValidationResult(IReadOnlyList<SaveViolation> Violation
     public bool CanSave => Violations.Count == 0;
 }
 
-/// <summary>保存できない理由。</summary>
-public sealed record SaveViolation(SaveViolationKind Kind, int? CostItemId, int? LaborLineId);
+/// <summary>
+/// 保存できない理由。作業明細の理由は LaborLineId を持つ。
+/// 月別修正の理由は、修正の合計(OverrideTotal)と、比べた見積額か年割額(ComparedAmount)を持ち、予算額の理由はその年度(FiscalYear)も持つ。
+/// </summary>
+public sealed record SaveViolation(
+    SaveViolationKind Kind,
+    int? CostItemId,
+    int? LaborLineId,
+    int? FiscalYear = null,
+    long? OverrideTotal = null,
+    long? ComparedAmount = null);
 
 public enum SaveViolationKind
 {

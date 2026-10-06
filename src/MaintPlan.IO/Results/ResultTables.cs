@@ -324,9 +324,20 @@ public static class ResultTables
             ]);
     }
 
-    /// <summary>保存の確認(保存できる・理由の種類)。</summary>
+    /// <summary>
+    /// 保存の確認(保存できる・理由の種類)。1行だけ置く。
+    /// 理由の種類は、保存できない理由の種類を重複なしで、種類の順に「、」でつなぐ。保存できるときは空欄にする。
+    /// </summary>
     public static TextTable SaveValidation(SaveValidationResult result, IReadOnlyList<string> columns) =>
-        throw new NotImplementedException();
+        GroupedTable.Build<SaveValidationResult>(
+            "保存の確認",
+            columns,
+            [result],
+            [],
+            [
+                new("保存できる", group => group[0].CanSave ? CellText.Yes : CellText.No),
+                new("理由の種類", group => string.Join("、", group[0].Violations.Select(violation => violation.Kind).Distinct().Order().Select(Labels.Of))),
+            ]);
 
     private static KeyColumn<TEntry> ExampleColumn<TEntry>(PlanIndex index, Func<TEntry, int> costItemId) =>
         new("例", entry => index.WorkOf(costItemId(entry)).ManagementNumber, entry => index.WorkOf(costItemId(entry)).Id);

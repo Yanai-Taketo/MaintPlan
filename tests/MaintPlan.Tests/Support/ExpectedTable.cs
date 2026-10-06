@@ -18,6 +18,10 @@ public sealed record ExpectedTable(ExpectedKind Kind, bool IsPartial, CsvTable T
     public IReadOnlyList<string> ValueColumns =>
         [.. Columns.Where(Kind.Values.ContainsKey)];
 
+    /// <summary>計算結果の表に置く列。比べない列(保存の確認の「結果」など)を除く。</summary>
+    public IReadOnlyList<string> ResultColumns =>
+        [.. Columns.Where(column => !(Kind.IgnoredColumns?.Contains(column) ?? false))];
+
     /// <summary>期待値ファイルを読み、形を確かめる。決まりに合わない点はまとめて例外にする。</summary>
     public static ExpectedTable Load(string filePath)
     {
