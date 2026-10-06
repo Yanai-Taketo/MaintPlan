@@ -63,7 +63,7 @@ public sealed record ConsoleArguments(
                 throw new ConsoleUsageException($"「{option}」は知らない引数です。");
             }
 
-            if (index + 1 >= args.Count || args[index + 1].StartsWith("--", StringComparison.Ordinal))
+            if (index + 1 >= args.Count || string.IsNullOrWhiteSpace(args[index + 1]) || args[index + 1].StartsWith("--", StringComparison.Ordinal))
             {
                 throw new ConsoleUsageException($"「{option}」の値がありません。");
             }

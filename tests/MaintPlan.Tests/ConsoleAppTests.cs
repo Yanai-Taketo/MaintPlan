@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.RegularExpressions;
 using MaintPlan.Cli;
 using MaintPlan.IO.Csv;
@@ -72,14 +73,49 @@ public sealed partial class ConsoleAppTests : IDisposable
     }
 
     [Fact]
-    public void All_tables_are_written()
+    public void All_tables_are_written_with_their_columns()
     {
+        var columns = new Dictionary<string, string[]>
+        {
+            ["月ごとの値"] = ["例", "費用内訳", "年月", "予算額", "見積額", "実績額", "人工"],
+            ["予算額の初期値"] = ["例", "費用内訳", "労務費", "予算額の初期値", "年割の初期値", "知らせる内容"],
+            ["山積み"] = ["欄", "予算額", "見積額", "実績額", "人工"],
+            ["人工の内訳"] = ["欄", "人員区分", "人工"],
+            ["残予算と見込み残"] = ["年度・費用区分", "予算枠", "実績額", "残予算", "未実績見込み", "見込み残"],
+            ["計算に使わない修正"] = ["例", "費用内訳", "金額の種類", "年月", "金額", "理由"],
+        };
+
         var run = Run(ArgumentsOf(TestCases.Get("例12/条件1")));
 
         Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
         Assert.Equal(
             WrittenKinds.Select(kind => kind + ".csv").Order(StringComparer.Ordinal),
             Directory.EnumerateFiles(OutputDirectory).Select(Path.GetFileName).Order(StringComparer.Ordinal));
+        foreach (var kind in WrittenKinds)
+        {
+            Assert.Equal(columns[kind], ReadWritten(kind).Columns);
+        }
+    }
+
+    /// <summary>人工の内訳の種別ごとの行(直営・協力会社)を欄ごとに足すと、同じ条件の山積みの人工になる。</summary>
+    [Theory]
+    [InlineData("例12/条件1")]
+    [InlineData("例12/条件2")]
+    [InlineData("例12/条件3")]
+    public void Labor_breakdown_follows_aggregation_condition(string caseId)
+    {
+        var testCase = TestCases.Get(caseId);
+        var expected = Narrow(ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, "山積み.csv")), ["欄", "人工"]);
+
+        var run = Run(ArgumentsOf(testCase));
+
+        Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+        var kindTotals = ReadWritten("人工の内訳").Rows
+            .Where(row => row[1] is "直営" or "協力会社")
+            .GroupBy(row => row[0])
+            .Select(group => (IReadOnlyList<string>)[group.Key, TenthsText(group.Sum(row => Tenths(row[2])))])
+            .ToList();
+        AssertMatches(expected, new TextTable(["欄", "人工"], kindTotals));
     }
 
     [Theory]
@@ -99,6 +135,11 @@ public sealed partial class ConsoleAppTests : IDisposable
         Assert.Equal(columns, written.Columns);
         AssertMatches(expected, written);
         Assert.Equal(shownMissingKinds, ShownMissingAmounts(run.Output).Rows.Select(row => row[0]));
+        if (shownMissingKinds.Length == 0)
+        {
+            Assert.DoesNotContain("未入力の件数:", Lines(run.Output));
+        }
+
         Assert.Contains($"  金額の種類: {amountKind}", Lines(run.Output));
     }
 
@@ -142,6 +183,8 @@ public sealed partial class ConsoleAppTests : IDisposable
         Directory.CreateDirectory(OutputDirectory);
         var memo = Path.Combine(OutputDirectory, "メモ.txt");
         File.WriteAllText(memo, "残す");
+        var otherCsv = Path.Combine(OutputDirectory, "工事.csv");
+        File.Copy(Path.Combine(testCase.InputDirectory, "工事.csv"), otherCsv);
 
         var first = Run([.. ArgumentsOf(testCase), ConsoleArguments.AmountKindOption, "見積額"]);
         var second = Run(ArgumentsOf(testCase));
@@ -150,6 +193,7 @@ public sealed partial class ConsoleAppTests : IDisposable
         Assert.Equal(ConsoleApp.Succeeded, second.ExitCode);
         Assert.Equal(["欄", "予算額", "見積額", "実績額", "人工"], ReadWritten("山積み").Columns);
         Assert.Equal("残す", File.ReadAllText(memo));
+        Assert.Equal(File.ReadAllBytes(Path.Combine(testCase.InputDirectory, "工事.csv")), File.ReadAllBytes(otherCsv));
     }
 
     [Theory]
@@ -157,6 +201,8 @@ public sealed partial class ConsoleAppTests : IDisposable
     [InlineData(new[] { "--input", "入力" }, "「--output」がありません。")]
     [InlineData(new[] { "--input" }, "「--input」の値がありません。")]
     [InlineData(new[] { "--input", "--output", "出力" }, "「--input」の値がありません。")]
+    [InlineData(new[] { "--input", " ", "--output", "出力" }, "「--input」の値がありません。")]
+    [InlineData(new[] { "--input", "入力", "--output", "" }, "「--output」の値がありません。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--status", "計画中" }, "「--status」は知らない引数です。")]
     [InlineData(new[] { "--input", "入力", "--input", "入力", "--output", "出力" }, "「--input」が2回あります。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--statuses", "計画中、保留" }, "「--statuses」の「保留」は計画中・承認済み・発注済み・施工中・完了・中止のどれでもありません。")]
@@ -216,14 +262,14 @@ public sealed partial class ConsoleAppTests : IDisposable
         var first = Run([.. ArgumentsOf(testCase), ConsoleArguments.AmountKindOption, "見積額"]);
 
         (int ExitCode, string Output, string Error) second;
-        using (new FileStream(Path.Combine(OutputDirectory, "計算に使わない修正.csv"), FileMode.Open, FileAccess.Read, FileShare.None))
+        using (new FileStream(Path.Combine(OutputDirectory, "計算に使わない修正.csv"), FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
         {
             second = Run([.. ArgumentsOf(testCase), ConsoleArguments.AmountKindOption, "予算額"]);
         }
 
         Assert.Equal(ConsoleApp.Succeeded, first.ExitCode);
         Assert.Equal(ConsoleApp.Failed, second.ExitCode);
-        Assert.StartsWith("書き出せません: ", Lines(second.Error)[0], StringComparison.Ordinal);
+        Assert.Equal("書き出せません: 計算に使わない修正.csv を開けません。ほかで開かれていれば、閉じてからやり直してください。", Lines(second.Error)[0]);
         Assert.Equal(["欄", "見積額", "人工"], ReadWritten("山積み").Columns);
     }
 
@@ -250,6 +296,47 @@ public sealed partial class ConsoleAppTests : IDisposable
 
         Assert.Equal(ConsoleApp.Failed, run.ExitCode);
         Assert.StartsWith("計算できません: ", Lines(run.Error)[0], StringComparison.Ordinal);
+        Assert.False(Directory.Exists(OutputDirectory));
+    }
+
+    [Fact]
+    public void Calculation_error_in_a_later_table_keeps_previous_results()
+    {
+        var input = CopyInput("例01-04/基本");
+        var first = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory, ConsoleArguments.AmountKindOption, "見積額"]);
+        File.AppendAllText(Path.Combine(input, "予算枠.csv"), "4,2026,修繕費,1,いいえ\n");
+
+        var second = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
+
+        Assert.Equal(ConsoleApp.Succeeded, first.ExitCode);
+        Assert.Equal(ConsoleApp.Failed, second.ExitCode);
+        Assert.StartsWith("計算できません: ", Lines(second.Error)[0], StringComparison.Ordinal);
+        Assert.Equal(["欄", "見積額", "人工"], ReadWritten("山積み").Columns);
+    }
+
+    [Fact]
+    public void Duplicate_id_is_reported_as_calculation_error()
+    {
+        var input = CopyInput("例01-04/基本");
+        File.AppendAllText(Path.Combine(input, "工事.csv"), "1,例9,ポンプ更新,施工中,2027-02-10,2027-05-24,,,,,,,,,いいえ\n");
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.StartsWith("計算できません: ", Lines(run.Error)[0], StringComparison.Ordinal);
+        Assert.False(Directory.Exists(OutputDirectory));
+    }
+
+    [Fact]
+    public void Overflow_is_reported_as_calculation_error()
+    {
+        var input = CopyInput("例12/条件1");
+        File.AppendAllText(Path.Combine(input, "実績.csv"), "2,4,2027-09,5000000000000000000,,いいえ\n3,4,2027-09,5000000000000000000,,いいえ\n");
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.Equal("計算できません: 金額か人工が大きすぎます。", Lines(run.Error)[0]);
         Assert.False(Directory.Exists(OutputDirectory));
     }
 
@@ -288,18 +375,24 @@ public sealed partial class ConsoleAppTests : IDisposable
         return new TextTable(table.Columns, [.. table.Rows.Select(row => row.Cells)]);
     }
 
-    /// <summary>画面に出た未入力の件数を、「金額の種類・件数・対象」の表にする。</summary>
+    /// <summary>画面に出た未入力の件数(見出しの下の字下げした行)を、「金額の種類・件数・対象」の表にする。形の違う行があれば失敗にする。</summary>
     private static TextTable ShownMissingAmounts(string output)
     {
-        var rows = Lines(output)
-            .SkipWhile(line => line != "未入力の件数:")
-            .Skip(1)
-            .Select(line => MissingAmountLine().Match(line))
-            .TakeWhile(match => match.Success)
-            .Select(match => (IReadOnlyList<string>)[match.Groups[1].Value, match.Groups[2].Value, match.Groups[3].Value])
-            .ToList();
+        var rows = new List<IReadOnlyList<string>>();
+        foreach (var line in Lines(output).SkipWhile(line => line != "未入力の件数:").Skip(1).TakeWhile(line => line.StartsWith(' ')))
+        {
+            var match = MissingAmountLine().Match(line);
+            Assert.True(match.Success, $"未入力の件数の行の形が違います: {line}");
+            rows.Add([match.Groups[1].Value, match.Groups[2].Value, match.Groups[3].Value]);
+        }
+
         return new TextTable(["金額の種類", "件数", "対象"], rows);
     }
+
+    /// <summary>小数点以下1桁の人工を、10倍した整数にする。</summary>
+    private static long Tenths(string text) => long.Parse(text.Replace(".", string.Empty, StringComparison.Ordinal), CultureInfo.InvariantCulture);
+
+    private static string TenthsText(long tenths) => string.Create(CultureInfo.InvariantCulture, $"{tenths / 10}.{tenths % 10}");
 
     private static void AssertMatches(ExpectedTable expected, TextTable actual)
     {
@@ -337,6 +430,6 @@ public sealed partial class ConsoleAppTests : IDisposable
 
     private static string[] Lines(string text) => text.Split(Environment.NewLine);
 
-    [GeneratedRegex(@"^  (予算額|見積額) ([0-9]+)件(?:\((.+)\))?\z")]
+    [GeneratedRegex(@"^  (\S+) ([0-9]+)件(?:\((.+)\))?\z")]
     private static partial Regex MissingAmountLine();
 }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using MaintPlan.Core.Model;
 using MaintPlan.IO.Csv;
 using MaintPlan.IO.Results;
@@ -72,9 +73,14 @@ public static class ConsoleApp
         {
             result = OutputTables.Build(plan, condition);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or KeyNotFoundException)
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
             error.WriteLine($"計算できません: {exception.Message}");
+            return Failed;
+        }
+        catch (OverflowException)
+        {
+            error.WriteLine("計算できません: 金額か人工が大きすぎます。");
             return Failed;
         }
 
@@ -107,14 +113,21 @@ public static class ConsoleApp
     }
 
     /// <summary>
-    /// 上書きするファイルが、ほかで(Excel などで)開かれていないことを確かめる。開かれていれば IOException になる。
+    /// 上書きするファイルが、ほかで(Excel などで)開かれていないことを確かめる。開けないファイルがあれば IOException にする。
     /// 一部のファイルだけが新しい結果になるのを防ぐため、書き始める前にすべてを確かめる。
     /// </summary>
     private static void EnsureNotInUse(IEnumerable<string> filePaths)
     {
         foreach (var filePath in filePaths.Where(File.Exists))
         {
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            try
+            {
+                using var stream = new FileStream(filePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException exception)
+            {
+                throw new IOException($"{Path.GetFileName(filePath)} を開けません。ほかで開かれていれば、閉じてからやり直してください。", exception);
+            }
         }
     }
 
@@ -125,7 +138,7 @@ public static class ConsoleApp
         output.WriteLine($"  金額の種類: {LabelList(condition.AmountKind is { } kind ? [kind] : Enum.GetValues<AmountKind>())}");
         output.WriteLine($"  含める状態: {LabelList(condition.Statuses)}");
         output.WriteLine($"  費用区分: {LabelList(condition.Categories)}");
-        output.WriteLine($"  集計基準日: {condition.BaseDate:yyyy-MM-dd}{(arguments.BaseDate is null ? "(当日)" : string.Empty)}");
+        output.WriteLine($"  集計基準日: {condition.BaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}{(arguments.BaseDate is null ? "(当日)" : string.Empty)}");
     }
 
     /// <summary>未入力の件数を「予算額 1件(例12D)」の形で、金額の種類ごとに1行ずつ書く。予算額・見積額を集計しないときは書かない。</summary>
