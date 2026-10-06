@@ -36,7 +36,7 @@ public static class QuarterlyAggregation
             .Concat(manDays.SelectMany(pair => ColumnsOf(pair.Entry.Slot).Select(column => (Column: column, Amount: 0L, pair.Entry.ManDaysTenths))))
             .GroupBy(entry => entry.Column)
             .Select(group => new AggregationCell(group.Key, group.Sum(entry => entry.Amount), group.Sum(entry => entry.ManDaysTenths)))
-            .OrderBy(cell => OrderOf(cell.Column))
+            .OrderBy(cell => cell.Column)
             .ToList();
         var breakdown = manDays
             .SelectMany(pair => ColumnsOf(pair.Entry.Slot).SelectMany(column => new[]
@@ -46,11 +46,8 @@ public static class QuarterlyAggregation
             }))
             .GroupBy(entry => (entry.Column, entry.Category.Kind, StaffCategoryId: entry.IsKindTotal ? (int?)null : entry.Category.Id))
             .OrderBy(group => (
-                OrderOf(group.Key.Column),
-                group.Key.Kind,
-                group.Key.StaffCategoryId is not null,
-                group.Key.StaffCategoryId is null ? 0 : group.First().Category.DisplayOrder,
-                group.Key.StaffCategoryId ?? 0))
+                group.Key.Column,
+                group.Key.StaffCategoryId is null ? StaffRowOrder.Of(group.Key.Kind) : StaffRowOrder.Of(group.First().Category)))
             .Select(group => new LaborBreakdownCell(group.Key.Column, group.Key.Kind, group.Key.StaffCategoryId, group.Sum(entry => entry.ManDaysTenths)))
             .ToList();
         var missing = CalculationTargets.MissingAmountCostItemIds(plan, condition.AmountKind).Where(items.Contains).Order().ToList();
@@ -66,10 +63,6 @@ public static class QuarterlyAggregation
             : AggregationColumn.Undetermined(slot.UndeterminedFiscalYear);
         return slot.FiscalYear is { } fiscalYear ? [column, AggregationColumn.FiscalYearTotal(fiscalYear)] : [column];
     }
-
-    /// <summary>欄を並べる順。年度ごとに1Q〜4Q、時期未定、合計の順とし、年度のない時期未定の欄を最後に置く。</summary>
-    private static (int FiscalYear, AggregationColumnKind Kind, int Quarter) OrderOf(AggregationColumn column) =>
-        (column.FiscalYear ?? int.MaxValue, column.Kind, column.Quarter ?? 0);
 
     private static StaffCategory CategoryOf(LaborLine line, Dictionary<int, StaffCategory> categories) =>
         categories.TryGetValue(line.StaffCategoryId, out var category)

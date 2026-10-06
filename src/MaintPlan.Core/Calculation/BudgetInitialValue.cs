@@ -26,9 +26,7 @@ public static class BudgetInitialValue
         var byId = categories.ToDictionary(category => category.Id);
         return [.. rates
             .Distinct()
-            .OrderBy(rate => byId[rate.StaffCategoryId].Kind)
-            .ThenBy(rate => byId[rate.StaffCategoryId].DisplayOrder)
-            .ThenBy(rate => rate.StaffCategoryId)
+            .OrderBy(rate => StaffRowOrder.Of(byId[rate.StaffCategoryId]))
             .ThenBy(rate => rate.FiscalYear)];
     }
 
