@@ -23,6 +23,9 @@ public sealed partial class ConsoleAppTests : IDisposable
 
     private const string MissingAmountKind = "未入力の件数";
 
+    /// <summary>全角のコンマ(U+FF0C)。半角の「,」と見分けられるように、文字コードで書く。</summary>
+    private const string FullWidthComma = "\uFF0C";
+
     private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
 
     private string OutputDirectory => Path.Combine(directory, "出力");
@@ -186,7 +189,7 @@ public sealed partial class ConsoleAppTests : IDisposable
         Assert.Contains("  金額の種類: 予算額、見積額、実績額", Lines(aggregationRun.Output));
         Assert.Contains("  含める状態: 計画中、承認済み、発注済み、施工中、完了、中止", Lines(aggregationRun.Output));
         Assert.Contains("  費用区分: 修繕費、設備投資", Lines(aggregationRun.Output));
-        Assert.Contains("  集計基準日: 2026-10-06(当日)", Lines(aggregationRun.Output));
+        Assert.Contains("  集計基準日: 2026-10-06(日本時間の当日)", Lines(aggregationRun.Output));
         Assert.Equal(ConsoleApp.Succeeded, remainingRun.ExitCode);
         AssertMatches(ExpectedTable.Load(Path.Combine(remainingCase.ExpectedDirectory, "残予算と見込み残.csv")), remaining);
     }
@@ -201,6 +204,20 @@ public sealed partial class ConsoleAppTests : IDisposable
         Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
         AssertMatches(ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, "山積み.csv")), ReadWritten("山積み"));
         Assert.Contains("  含める状態: 承認済み、発注済み、施工中、完了、中止", Lines(run.Output));
+    }
+
+    /// <summary>区切りには全角のコンマも使え、「、」「,」と混ぜてもよい。項目の前後の空白は除く。</summary>
+    [Fact]
+    public void List_items_can_be_separated_by_full_width_comma()
+    {
+        var testCase = TestCases.Get("例12/条件2");
+
+        var run = Run([ConsoleArguments.Input, testCase.InputDirectory, ConsoleArguments.Output, OutputDirectory, ConsoleArguments.StatusesOption, $"承認済み{FullWidthComma} 発注済み {FullWidthComma}施工中,完了、中止", ConsoleArguments.CategoriesOption, $"修繕費 {FullWidthComma} 設備投資"]);
+
+        Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+        AssertMatches(ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, "山積み.csv")), ReadWritten("山積み"));
+        Assert.Contains("  含める状態: 承認済み、発注済み、施工中、完了、中止", Lines(run.Output));
+        Assert.Contains("  費用区分: 修繕費、設備投資", Lines(run.Output));
     }
 
     [Fact]
@@ -234,6 +251,8 @@ public sealed partial class ConsoleAppTests : IDisposable
     [InlineData(new[] { "--input", "入力", "--input", "入力", "--output", "出力" }, "「--input」が2回あります。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--statuses", "計画中、保留" }, "「--statuses」の「保留」は計画中・承認済み・発注済み・施工中・完了・中止のどれでもありません。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--statuses", "計画中、、完了" }, "「--statuses」の「計画中、、完了」に空の項目があります。")]
+    [InlineData(new[] { "--input", "入力", "--output", "出力", "--statuses", $"計画中{FullWidthComma}{FullWidthComma}完了" }, $"「--statuses」の「計画中{FullWidthComma}{FullWidthComma}完了」に空の項目があります。")]
+    [InlineData(new[] { "--input", "入力", "--output", "出力", "--categories", $"修繕費, {FullWidthComma}設備投資" }, $"「--categories」の「修繕費, {FullWidthComma}設備投資」に空の項目があります。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--categories", "修繕" }, "「--categories」の「修繕」は修繕費・設備投資のどれでもありません。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--base-date", "2027/10/31" }, "「--base-date」の「2027/10/31」は YYYY-MM-DD の日付ではありません。")]
     [InlineData(new[] { "--input", "入力", "--output", "出力", "--amount-kind", "予算額、見積額" }, "「--amount-kind」の「予算額、見積額」は予算額・見積額・実績額のどれでもありません。")]
@@ -255,6 +274,17 @@ public sealed partial class ConsoleAppTests : IDisposable
         Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
         Assert.Equal(ConsoleArguments.Usage, run.Output);
         Assert.Empty(run.Error);
+    }
+
+    /// <summary>使い方は、区切りの3つの文字と、集計基準日を省いたときの日本時間の当日を示す。</summary>
+    [Fact]
+    public void Usage_shows_separators_and_today_in_japan_time()
+    {
+        var lines = Lines(ConsoleArguments.Usage);
+
+        Assert.Contains($"  --statuses     山積み・人工の内訳・未入力の件数に含める状態。「、」「,」「{FullWidthComma}」のどれかで区切る(すべて)", lines);
+        Assert.Contains($"  --categories   山積み・人工の内訳・未入力の件数に含める費用区分。「、」「,」「{FullWidthComma}」のどれかで区切る(修繕費と設備投資の両方)", lines);
+        Assert.Contains("  --base-date    残予算と見込み残の集計基準日。YYYY-MM-DD(日本時間の当日)", lines);
     }
 
     [Fact]
