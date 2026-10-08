@@ -1,0 +1,119 @@
+using MaintPlan.Core.Calculation;
+using MaintPlan.Core.Model;
+using MaintPlan.IO.Csv;
+using MaintPlan.IO.Results;
+using MaintPlan.Tests.Support;
+
+namespace MaintPlan.Tests;
+
+/// <summary>
+/// 山積みと未入力の件数の表に、集計の条件の違う結果を混ぜて渡したときに、例外にすることを確かめる。
+/// 例13には作業明細がないため、状態や費用区分を変えても人工は変わらない。人工の食い違いは、作業明細のある例12で確かめる。
+/// </summary>
+public class ResultTablesTests
+{
+    private static readonly IReadOnlyList<string> AggregationColumns = ["欄", "予算額", "見積額", "人工"];
+
+    private static readonly IReadOnlyList<string> MissingAmountColumns = ["金額の種類", "件数", "対象"];
+
+    private static readonly PlanData Plan = PlanCsvReader.ReadFolder(TestCases.Get("例13/基本").InputDirectory);
+
+    [Fact]
+    public void Results_with_different_statuses_are_rejected_even_when_man_days_agree()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Budget, AllStatuses(), BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, new HashSet<WorkStatus> { WorkStatus.InProgress }, BothCategories()),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+        Assert.Throws<ArgumentException>(() => ResultTables.MissingAmounts(Plan, results, MissingAmountColumns));
+    }
+
+    [Fact]
+    public void Results_with_as_many_but_different_statuses_are_rejected()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Budget, new HashSet<WorkStatus> { WorkStatus.Planning }, BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, new HashSet<WorkStatus> { WorkStatus.InProgress }, BothCategories()),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+    }
+
+    [Fact]
+    public void Results_from_different_inputs_are_rejected_when_man_days_disagree()
+    {
+        // 例12には作業明細があるので、作業明細を1行除いた入力から集計すると人工が変わる。
+        var plan = PlanCsvReader.ReadFolder(TestCases.Get("例12/条件1").InputDirectory);
+        var fewer = plan with { LaborLines = [.. plan.LaborLines.Skip(1)] };
+        var condition = new AggregationCondition(AmountKind.Budget, AllStatuses(), BothCategories());
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = QuarterlyAggregation.Calculate(plan, condition),
+            [AmountKind.Estimate] = QuarterlyAggregation.Calculate(fewer, condition with { AmountKind = AmountKind.Estimate }),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+    }
+
+    [Fact]
+    public void Results_with_different_categories_are_rejected()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Budget, AllStatuses(), BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, AllStatuses(), new HashSet<CostCategory> { CostCategory.Repair }),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+        Assert.Throws<ArgumentException>(() => ResultTables.MissingAmounts(Plan, results, MissingAmountColumns));
+    }
+
+    [Fact]
+    public void Result_of_another_amount_kind_is_rejected()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Estimate, AllStatuses(), BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, AllStatuses(), BothCategories()),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+        Assert.Throws<ArgumentException>(() => ResultTables.MissingAmounts(Plan, results, MissingAmountColumns));
+    }
+
+    [Fact]
+    public void Changing_the_caller_set_after_aggregation_does_not_change_the_condition()
+    {
+        var statuses = AllStatuses();
+        var budget = Aggregate(AmountKind.Budget, statuses, BothCategories());
+        statuses.Remove(WorkStatus.Planning);
+        var estimate = Aggregate(AmountKind.Estimate, statuses, BothCategories());
+        var results = new Dictionary<AmountKind, AggregationResult> { [AmountKind.Budget] = budget, [AmountKind.Estimate] = estimate };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+    }
+
+    [Fact]
+    public void Results_with_the_same_condition_are_accepted()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Budget, AllStatuses(), BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, AllStatuses(), BothCategories()),
+        };
+
+        Assert.Equal(AggregationColumns, ResultTables.Aggregation(results, AggregationColumns).Columns);
+        Assert.Equal(2, ResultTables.MissingAmounts(Plan, results, MissingAmountColumns).Rows.Count);
+    }
+
+    private static AggregationResult Aggregate(AmountKind kind, IReadOnlySet<WorkStatus> statuses, IReadOnlySet<CostCategory> categories) =>
+        QuarterlyAggregation.Calculate(Plan, new AggregationCondition(kind, statuses, categories));
+
+    private static HashSet<WorkStatus> AllStatuses() => [.. Enum.GetValues<WorkStatus>()];
+
+    private static HashSet<CostCategory> BothCategories() => [.. Enum.GetValues<CostCategory>()];
+}

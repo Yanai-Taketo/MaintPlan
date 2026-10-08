@@ -43,6 +43,18 @@ public static class Labels
             (Priority.Medium, "中"),
             (Priority.Low, "低"),
         ],
+        [typeof(PlanTable)] =
+        [
+            (PlanTable.ConstructionWork, "工事"),
+            (PlanTable.CostItem, "費用内訳"),
+            (PlanTable.AnnualBudget, "予算年割"),
+            (PlanTable.ActualCost, "実績"),
+            (PlanTable.MonthlyOverride, "月別修正"),
+            (PlanTable.LaborLine, "作業明細"),
+            (PlanTable.StaffCategory, "人員区分"),
+            (PlanTable.UnitRate, "単価"),
+            (PlanTable.BudgetFrame, "予算枠"),
+        ],
         [typeof(UnusedOverrideReason)] =
         [
             (UnusedOverrideReason.OutsidePeriod, "工期に入らない月"),
