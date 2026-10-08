@@ -13,6 +13,7 @@
 - sub2 と、この資料の更新は、PR #11(2026-10-08)で kotei1-dan7 に入った。
 - 利用者の確認を待っていた点と、確認を受けていなかった決まりは、すべて利用者の確認を受け、「確認済みの決まり」に移した。決まりが変わったもの(当日の決め方、区切りの文字、削除済みの工事・費用内訳の下の行、負の値の文)は、kotei1-dan7-rules で直した。
 - sub1 と sub2 を入れた状態で、`dotnet test` は484件すべてが成功。テストデータの改行を CRLF にしても、すべて成功する。
+- kotei1-dan7-rules を入れた状態で、`dotnet test` は520件すべてが成功。テストデータの改行を CRLF にしても、テストを動かすマシンのタイムゾーンを UTC・Asia/Tokyo・America/New_York・Pacific/Kiritimati にしても、すべて成功する。
 - 例12・例13・例15のうち、設計書4章に表のない値(月ごとの値、予算額の初期値、残予算と見込み残、計算に使わない修正)は、設計書4章の規則と入力の CSV から手計算し、確認用コンソールの出力と一致することを確かめた。テストの期待値にはしていない。
 - テストデータの値は、利用者がすべてを確かめられていない。工程1が完成した後の点検で確かめる。
 - 次の作業は、例16(kotei1-dan7-ex16)、そして sub3(Excel の読み込みと書き出し)。
@@ -37,8 +38,8 @@
 | src/MaintPlan.IO/Csv | 9つのテーブルの CSV の読み込み(PlanCsvReader)、CSV を表として読む CsvTable、結果の表を CSV に書く ResultCsvWriter。PlanCsvReader.Read は形の違う値を全件集め、PlanData と行の場所(PlanSource)を PlanReadResult で返す。PlanCsvReader.ReadFolder は最初の1件を投げる |
 | src/MaintPlan.IO/Input | 行のファイルでの場所(PlanSource、TableSource)と、入力の確認の違反をファイル・行・列の文にする InputViolationText |
 | src/MaintPlan.IO/Results | 計算結果を4章の表の形にする ResultTables と TextTable。表は GroupedTable(キーの列で行をまとめて合計する)、CellText(セルの書き方)、PlanIndex(ID から工事・費用内訳などを引く)で作る。OutputTables は、確認用コンソールが書き出す6つの表と未入力の件数を、集計の条件(OutputCondition)から作る |
-| src/MaintPlan.Cli | 確認用コンソール。ConsoleArguments が引数を読み、ConsoleApp が読み込み・入力の確認・計算・書き出しと画面の表示をする。Program は ConsoleApp を呼ぶだけ |
-| tests/MaintPlan.Tests | CalculationTests が期待値ファイルごとに計算して比べる。Support/ActualTables.cs が、期待値の種類ごとに Core の計算と ResultTables を呼ぶ。SaveValidationTests は、保存できない理由が持つ作業明細・年度・金額を、例14の値で確かめる。ConsoleAppTests は、確認用コンソールを動かし、書き出したファイルを読み直して、6つの表の期待値ファイル(31ファイル)と比べる。未入力の件数(4ファイル)は画面の表示と比べる。ResultCsvWriterTests は、CSV の書き出し(BOM、上書き)を確かめる。CsvReaderTests は、形の誤りの行と列、全件の収集、行の場所を確かめる。InputValidationTests は、例01-04の入力を写して変えたものと例14で、入力の確認が示す行と理由を確かめる。ResultTablesTests は、山積みと未入力の件数の表に集計の条件の違う結果を渡すと例外になることを確かめる。テストのプロジェクトは MaintPlan.Cli を参照する |
+| src/MaintPlan.Cli | 確認用コンソール。ConsoleArguments が引数を読み、ConsoleApp が読み込み・入力の確認・計算・書き出しと画面の表示をする。JapanDate は日本時間の当日を求める。Program は JapanDate で当日を求めて ConsoleApp を呼ぶだけ |
+| tests/MaintPlan.Tests | CalculationTests が期待値ファイルごとに計算して比べる。Support/ActualTables.cs が、期待値の種類ごとに Core の計算と ResultTables を呼ぶ。SaveValidationTests は、保存できない理由が持つ作業明細・年度・金額を、例14の値で確かめる。ConsoleAppTests は、確認用コンソールを動かし、書き出したファイルを読み直して、6つの表の期待値ファイル(31ファイル)と比べる。未入力の件数(4ファイル)は画面の表示と比べる。JapanDateTests は、日本時間の当日の境目と、渡した時刻の時差によらないことを確かめる。ResultCsvWriterTests は、CSV の書き出し(BOM、上書き)を確かめる。CsvReaderTests は、形の誤りの行と列、全件の収集、行の場所を確かめる。InputValidationTests は、例01-04の入力を写して変えたものと例14で、入力の確認が示す行と理由を確かめる。ResultTablesTests は、山積みと未入力の件数の表に集計の条件の違う結果を渡すと例外になることを確かめる。テストのプロジェクトは MaintPlan.Cli を参照する |
 | tests/data | 31ケースのテストデータと README |
 
 金額は long、人工と作業日数は10倍した long、日付は DateOnly で持ちます。

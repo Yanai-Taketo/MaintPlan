@@ -6,7 +6,8 @@ namespace MaintPlan.Core.Calculation;
 /// <summary>
 /// 入力の確認。設計書3章の決まり(重複なし、開始日と終了日は両方入れるか両方空欄)、参照先の行があること、終了日が開始日より前でないこと、
 /// 月別修正の金額の種類と、4章の保存できない条件を確かめ、当たる行をすべて返す。
-/// ID・管理番号の重複と参照先は、削除済みの行も含めて確かめる。参照先の行は、削除済みでもよい。そのほかは、削除済みの行を確かめない。
+/// ID・管理番号の重複と参照先は、削除済みの行も含めて確かめる。参照先の行は、削除済みでもよい。
+/// そのほかは、削除済みの行と、削除済みの工事・費用内訳の下にある行を確かめない(計算と同じ)。単価は、人員区分が削除済みでも確かめる。
 /// 保存できない条件は、保存の確認が例外になる行と、どの行を指すかが決まらない行を除いて確かめる。
 /// </summary>
 public static class InputValidation
@@ -15,13 +16,14 @@ public static class InputValidation
 
     public static InputValidationResult Validate(PlanData plan)
     {
+        var deleted = new DeletedRows(plan);
         List<InputViolation> violations =
         [
             .. DuplicateIds(plan),
-            .. DuplicateValues(plan),
-            .. DateViolations(plan),
+            .. DuplicateValues(plan, deleted),
+            .. DateViolations(plan, deleted),
             .. MissingReferences(plan),
-            .. OverrideKindViolations(plan),
+            .. OverrideKindViolations(plan, deleted),
         ];
         violations.AddRange([.. SaveViolations(plan, violations)]);
         return new InputValidationResult([.. violations.OrderBy(violation => violation.Table).ThenBy(violation => violation.RowIndex)]);
@@ -43,18 +45,21 @@ public static class InputValidation
     private static IEnumerable<InputViolation> DuplicateIdsOf<T>(PlanTable table, IReadOnlyList<T> rows, Func<T, int> id) =>
         Duplicates(table, rows, _ => true, id, InputViolationKind.DuplicateId, ["ID"], row => $"ID {Number(id(row))} ");
 
-    /// <summary>3章の「重複なし」。管理番号は削除済みの行も含め、そのほかは削除済みでない行どうしで確かめる。工事番号は、入れた行だけを確かめる。</summary>
-    private static IEnumerable<InputViolation> DuplicateValues(PlanData plan) =>
+    /// <summary>
+    /// 3章の「重複なし」。管理番号は削除済みの行も含め、そのほかは削除済みの行と同じに扱う行を除いて確かめる。工事番号は、入れた行だけを確かめる。
+    /// 単価は、人員区分が削除済みでも確かめる。
+    /// </summary>
+    private static IEnumerable<InputViolation> DuplicateValues(PlanData plan, DeletedRows deleted) =>
     [
         .. Duplicates(PlanTable.ConstructionWork, plan.ConstructionWorks, _ => true, row => row.ManagementNumber,
             InputViolationKind.DuplicateValue, ["管理番号"], row => $"管理番号{Text(row.ManagementNumber)}"),
-        .. Duplicates(PlanTable.CostItem, plan.CostItems, row => !row.IsDeleted, row => (row.ConstructionWorkId, row.Category),
+        .. Duplicates(PlanTable.CostItem, plan.CostItems, row => !deleted.IsDeleted(row), row => (row.ConstructionWorkId, row.Category),
             InputViolationKind.DuplicateValue, ["工事ID", "費用区分"], row => $"工事ID {Number(row.ConstructionWorkId)} と費用区分{Text(Labels.Of(row.Category))}の組み合わせ"),
-        .. Duplicates(PlanTable.CostItem, plan.CostItems, row => !row.IsDeleted && row.WorkNumber is not null, row => row.WorkNumber!,
+        .. Duplicates(PlanTable.CostItem, plan.CostItems, row => !deleted.IsDeleted(row) && row.WorkNumber is not null, row => row.WorkNumber!,
             InputViolationKind.DuplicateValue, ["工事番号"], row => $"工事番号{Text(row.WorkNumber!)}"),
-        .. Duplicates(PlanTable.AnnualBudget, plan.AnnualBudgets, row => !row.IsDeleted, row => (row.CostItemId, row.FiscalYear),
+        .. Duplicates(PlanTable.AnnualBudget, plan.AnnualBudgets, row => !deleted.IsDeleted(row.IsDeleted, row.CostItemId), row => (row.CostItemId, row.FiscalYear),
             InputViolationKind.DuplicateValue, ["費用内訳ID", "年度"], row => $"費用内訳ID {Number(row.CostItemId)} と年度 {Number(row.FiscalYear)} の組み合わせ"),
-        .. Duplicates(PlanTable.MonthlyOverride, plan.MonthlyOverrides, row => !row.IsDeleted, row => (row.CostItemId, row.Kind, row.Month),
+        .. Duplicates(PlanTable.MonthlyOverride, plan.MonthlyOverrides, row => !deleted.IsDeleted(row.IsDeleted, row.CostItemId), row => (row.CostItemId, row.Kind, row.Month),
             InputViolationKind.DuplicateValue, ["費用内訳ID", "金額の種類", "年月"],
             row => $"費用内訳ID {Number(row.CostItemId)}・金額の種類{Text(Labels.Of(row.Kind))}・年月 {row.Month} の組み合わせ"),
         .. Duplicates(PlanTable.StaffCategory, plan.StaffCategories, row => !row.IsDeleted, row => (row.Kind, row.Name),
@@ -87,11 +92,11 @@ public static class InputValidation
         }
     }
 
-    /// <summary>工事と作業明細の開始日と終了日。削除済みでない行を確かめる。</summary>
-    private static IEnumerable<InputViolation> DateViolations(PlanData plan) =>
+    /// <summary>工事と作業明細の開始日と終了日。削除済みの行と同じに扱う行は確かめない。</summary>
+    private static IEnumerable<InputViolation> DateViolations(PlanData plan, DeletedRows deleted) =>
     [
         .. DateViolationsOf(PlanTable.ConstructionWork, plan.ConstructionWorks, row => row.IsDeleted, row => (row.StartDate, row.EndDate)),
-        .. DateViolationsOf(PlanTable.LaborLine, plan.LaborLines, row => row.IsDeleted, row => (row.StartDate, row.EndDate)),
+        .. DateViolationsOf(PlanTable.LaborLine, plan.LaborLines, row => deleted.IsDeleted(row.IsDeleted, row.CostItemId), row => (row.StartDate, row.EndDate)),
     ];
 
     private static IEnumerable<InputViolation> DateViolationsOf<T>(
@@ -148,13 +153,13 @@ public static class InputValidation
         }
     }
 
-    /// <summary>月別修正の金額の種類。削除済みでない行を確かめる。</summary>
-    private static IEnumerable<InputViolation> OverrideKindViolations(PlanData plan)
+    /// <summary>月別修正の金額の種類。削除済みの行と同じに扱う行は確かめない。</summary>
+    private static IEnumerable<InputViolation> OverrideKindViolations(PlanData plan, DeletedRows deleted)
     {
         for (var index = 0; index < plan.MonthlyOverrides.Count; index++)
         {
             var row = plan.MonthlyOverrides[index];
-            if (!row.IsDeleted && row.Kind is not (AmountKind.Budget or AmountKind.Estimate))
+            if (!deleted.IsDeleted(row.IsDeleted, row.CostItemId) && row.Kind is not (AmountKind.Budget or AmountKind.Estimate))
             {
                 yield return new InputViolation(InputViolationKind.InvalidOverrideKind, PlanTable.MonthlyOverride, index, ["金額の種類"], "月別修正の金額の種類は、予算額か見積額です。");
             }
@@ -254,6 +259,32 @@ public static class InputValidation
     }
 
     private static string Text(string value) => $"「{value}」";
+
+    /// <summary>
+    /// 削除済みの行と同じに扱う行。削除済みの印がある行と、削除済みの工事・費用内訳の下にある行。
+    /// 工事と費用内訳は、同じ ID の行がすべて削除済みとして扱う行のときだけ、削除済みとする(計算の対象の決め方と同じ)。
+    /// 参照先の行がない行は、削除済みの親の下とは扱わない。
+    /// </summary>
+    private sealed class DeletedRows
+    {
+        private readonly HashSet<int> works;
+        private readonly HashSet<int> costItems;
+
+        public DeletedRows(PlanData plan)
+        {
+            works = DeletedIds(plan.ConstructionWorks, row => row.Id, row => row.IsDeleted);
+            costItems = DeletedIds(plan.CostItems, row => row.Id, IsDeleted);
+        }
+
+        /// <summary>削除済みの印があるか、工事が削除済みの費用内訳。</summary>
+        public bool IsDeleted(CostItem row) => row.IsDeleted || works.Contains(row.ConstructionWorkId);
+
+        /// <summary>費用内訳の下の行(予算年割・実績・月別修正・作業明細)で、削除済みの印があるか、費用内訳が削除済みのもの。</summary>
+        public bool IsDeleted(bool isDeleted, int costItemId) => isDeleted || costItems.Contains(costItemId);
+
+        private static HashSet<int> DeletedIds<T>(IReadOnlyList<T> rows, Func<T, int> id, Func<T, bool> isDeleted) =>
+            [.. rows.GroupBy(id).Where(group => group.All(isDeleted)).Select(group => group.Key)];
+    }
 
     private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
 
