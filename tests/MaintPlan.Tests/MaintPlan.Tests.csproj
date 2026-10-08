@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MaintPlan.Core\MaintPlan.Core.csproj" />
     <ProjectReference Include="..\..\src\MaintPlan.IO\MaintPlan.IO.csproj" />
+    <ProjectReference Include="..\..\src\MaintPlan.Cli\MaintPlan.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>
