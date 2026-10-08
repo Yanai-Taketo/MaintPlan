@@ -7,7 +7,7 @@ namespace MaintPlan.Core.Calculation;
 /// 入力の確認。設計書3章の決まり(重複なし、開始日と終了日は両方入れるか両方空欄)、参照先の行があること、終了日が開始日より前でないこと、
 /// 月別修正の金額の種類と、4章の保存できない条件を確かめ、当たる行をすべて返す。
 /// ID・管理番号の重複と参照先は、削除済みの行も含めて確かめる。参照先の行は、削除済みでもよい。そのほかは、削除済みの行を確かめない。
-/// 保存できない条件は、ほかの決まりに合わない行を除き、月別修正と年割の決まりに合わない行がある費用内訳も除いて確かめる。
+/// 保存できない条件は、保存の確認が例外になる行と、どの行を指すかが決まらない行を除いて確かめる。
 /// </summary>
 public static class InputValidation
 {
@@ -23,7 +23,7 @@ public static class InputValidation
             .. MissingReferences(plan),
             .. OverrideKindViolations(plan),
         ];
-        violations.AddRange(SaveViolations(plan, violations));
+        violations.AddRange([.. SaveViolations(plan, violations)]);
         return new InputValidationResult([.. violations.OrderBy(violation => violation.Table).ThenBy(violation => violation.RowIndex)]);
     }
 
@@ -162,39 +162,46 @@ public static class InputValidation
     }
 
     /// <summary>
-    /// 保存できない条件。found に当たる行(重複の最初の行を含む)と、月別修正か年割の行が found に当たる費用内訳を除いた入力で確かめる。
+    /// 保存できない条件。保存の確認が例外になる行と、どの行を指すかが決まらない行を除いた入力で確かめる。
+    /// 除くのは、工事・費用内訳・作業明細の ID が重複した行(最初の行も)、工事と作業明細の日付が決まりに合わない行、
+    /// 費用内訳と年度が重複した年割の行(最初の行も)、金額の種類が決まりに合わない月別修正の行と、
+    /// 組み合わせが重複した月別修正の、費用内訳・金額の種類が同じ修正すべて(修正の合計が決まらないため)。
     /// 作業明細の理由は作業明細の行、見積額の理由は費用内訳の行、予算額の理由はその年度の年割の行で示す。
     /// </summary>
     private static IEnumerable<InputViolation> SaveViolations(PlanData plan, IReadOnlyList<InputViolation> found)
     {
-        var excludedRows = found
-            .SelectMany(violation => violation.FirstRowIndex is { } first
-                ? new[] { (violation.Table, violation.RowIndex), (violation.Table, RowIndex: first) }
-                : new[] { (violation.Table, violation.RowIndex) })
-            .ToHashSet();
-        var excludedCostItems = excludedRows
-            .Select(row => row.Table switch
+        var excludedRows = new HashSet<(PlanTable Table, int RowIndex)>();
+        var excludedOverrides = new HashSet<(int CostItemId, AmountKind Kind)>();
+        foreach (var violation in found)
+        {
+            switch (violation.Kind, violation.Table)
             {
-                PlanTable.AnnualBudget => plan.AnnualBudgets[row.RowIndex].CostItemId,
-                PlanTable.MonthlyOverride => plan.MonthlyOverrides[row.RowIndex].CostItemId,
-                _ => (int?)null,
-            })
-            .OfType<int>()
-            .ToHashSet();
+                case (InputViolationKind.DuplicateId, PlanTable.ConstructionWork or PlanTable.CostItem or PlanTable.LaborLine):
+                case (InputViolationKind.DuplicateValue, PlanTable.AnnualBudget):
+                    excludedRows.Add((violation.Table, violation.RowIndex));
+                    excludedRows.Add((violation.Table, violation.FirstRowIndex!.Value));
+                    break;
+                case (InputViolationKind.DatesNotPaired or InputViolationKind.EndBeforeStart or InputViolationKind.InvalidOverrideKind, _):
+                    excludedRows.Add((violation.Table, violation.RowIndex));
+                    break;
+                case (InputViolationKind.DuplicateValue, PlanTable.MonthlyOverride):
+                {
+                    var duplicated = plan.MonthlyOverrides[violation.RowIndex];
+                    excludedOverrides.Add((duplicated.CostItemId, duplicated.Kind));
+                    break;
+                }
+            }
+        }
 
         IReadOnlyList<T> Keep<T>(PlanTable table, IReadOnlyList<T> rows) => [.. rows.Where((_, index) => !excludedRows.Contains((table, index)))];
 
-        var checkedPlan = new PlanData
+        var checkedPlan = plan with
         {
             ConstructionWorks = Keep(PlanTable.ConstructionWork, plan.ConstructionWorks),
-            CostItems = [.. Keep(PlanTable.CostItem, plan.CostItems).Where(item => !excludedCostItems.Contains(item.Id))],
+            CostItems = Keep(PlanTable.CostItem, plan.CostItems),
             AnnualBudgets = Keep(PlanTable.AnnualBudget, plan.AnnualBudgets),
-            ActualCosts = Keep(PlanTable.ActualCost, plan.ActualCosts),
-            MonthlyOverrides = Keep(PlanTable.MonthlyOverride, plan.MonthlyOverrides),
+            MonthlyOverrides = [.. Keep(PlanTable.MonthlyOverride, plan.MonthlyOverrides).Where(o => !excludedOverrides.Contains((o.CostItemId, o.Kind)))],
             LaborLines = Keep(PlanTable.LaborLine, plan.LaborLines),
-            StaffCategories = Keep(PlanTable.StaffCategory, plan.StaffCategories),
-            UnitRates = Keep(PlanTable.UnitRate, plan.UnitRates),
-            BudgetFrames = Keep(PlanTable.BudgetFrame, plan.BudgetFrames),
         };
 
         int IndexOf<T>(PlanTable table, IReadOnlyList<T> rows, Func<T, bool> match) =>

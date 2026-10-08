@@ -48,12 +48,20 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row, ICol
         where T : struct, Enum =>
         Parse<T>(column, text => Labels.TryParse<T>(text, out var value) ? value : null, string.Join("・", Labels.All<T>()) + "のどれか");
 
+    /// <summary>選択項目のうち、allowed の値だけを受け付ける。</summary>
+    public T Choice<T>(string column, IReadOnlyList<T> allowed)
+        where T : struct, Enum =>
+        Required(column, name => Parse<T>(
+            name,
+            text => Labels.TryParse<T>(text, out var value) && allowed.Contains(value) ? value : null,
+            string.Join("・", allowed.Select(Labels.Of)) + "のどれか"));
+
     public string Text(string column) => Required(column, OptionalText);
 
     public string? OptionalText(string column) => Cell(column) is { Length: > 0 } text ? text : null;
 
     /// <summary>形の違う値として errors に足す。</summary>
-    public void Report(string column, string message) =>
+    private void Report(string column, string message) =>
         errors.Add(new CsvFormatException(table.FilePath, row.LineNumber, column, message));
 
     private string Cell(string column)

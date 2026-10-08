@@ -18,6 +18,9 @@ public sealed partial class ConsoleAppTests : IDisposable
     /// <summary>確認用コンソールが書き出す表。ファイル名は、期待値の種類の名前と同じ。</summary>
     private static readonly string[] WrittenKinds = ["月ごとの値", "予算額の初期値", "山積み", "人工の内訳", "残予算と見込み残", "計算に使わない修正"];
 
+    /// <summary>書き出す表のうち、含める状態と費用区分の条件を当てない表。</summary>
+    private static readonly string[] UnconditionedKinds = ["月ごとの値", "予算額の初期値", "残予算と見込み残", "計算に使わない修正"];
+
     private const string MissingAmountKind = "未入力の件数";
 
     private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
@@ -36,6 +39,12 @@ public sealed partial class ConsoleAppTests : IDisposable
     public static TheoryData<string, string> WrittenExpectedFiles =>
         [.. TestCases.All.SelectMany(testCase => testCase.ExpectedFileNames
             .Where(fileName => WrittenKinds.Contains(KindNameOf(fileName)))
+            .Select(fileName => (testCase.Id, fileName)))];
+
+    /// <summary>集計の条件(状態・費用区分)を当てない表の期待値ファイル。</summary>
+    public static TheoryData<string, string> UnconditionedExpectedFiles =>
+        [.. TestCases.All.SelectMany(testCase => testCase.ExpectedFileNames
+            .Where(fileName => UnconditionedKinds.Contains(KindNameOf(fileName)))
             .Select(fileName => (testCase.Id, fileName)))];
 
     /// <summary>未入力の件数の期待値ファイル。</summary>
@@ -70,6 +79,24 @@ public sealed partial class ConsoleAppTests : IDisposable
         var shown = ShownMissingAmounts(run.Output);
         Assert.Equal(["予算額", "見積額"], shown.Rows.Select(row => row[0]));
         AssertMatches(expected, shown);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnconditionedExpectedFiles))]
+    public void Statuses_and_categories_do_not_apply_to_other_tables(string caseId, string fileName)
+    {
+        var testCase = TestCases.Get(caseId);
+        var expected = ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, fileName));
+        List<string> args = [ConsoleArguments.Input, testCase.InputDirectory, ConsoleArguments.Output, OutputDirectory, ConsoleArguments.StatusesOption, "承認済み", ConsoleArguments.CategoriesOption, "設備投資"];
+        if (testCase.Properties.ContainsKey("集計基準日"))
+        {
+            args.AddRange([ConsoleArguments.BaseDateOption, testCase.BaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)]);
+        }
+
+        var run = Run([.. args]);
+
+        Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+        AssertMatches(expected, ReadWritten(expected.Kind.Name));
     }
 
     [Fact]
@@ -253,6 +280,30 @@ public sealed partial class ConsoleAppTests : IDisposable
 
         Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
         Assert.Equal($"出力先にはフォルダを指定します。同じ名前のファイルがあります: {output}", Lines(run.Error)[0]);
+    }
+
+    [Fact]
+    public void Output_with_a_trailing_separator_must_not_be_a_file()
+    {
+        Directory.CreateDirectory(directory);
+        var output = Path.Combine(directory, "出力.csv");
+        File.WriteAllText(output, string.Empty);
+
+        var run = Run([ConsoleArguments.Input, TestCases.Get("例12/条件1").InputDirectory, ConsoleArguments.Output, output + Path.DirectorySeparatorChar]);
+
+        Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
+    }
+
+    [Fact]
+    public void Nothing_is_written_when_a_folder_has_the_name_of_an_output_file()
+    {
+        Directory.CreateDirectory(Path.Combine(OutputDirectory, "山積み.csv"));
+
+        var run = Run(ArgumentsOf(TestCases.Get("例12/条件1")));
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.Equal("書き出せません: 山積み.csv と同じ名前のフォルダがあります。", Lines(run.Error)[0]);
+        Assert.Equal(["山積み.csv"], Directory.EnumerateFileSystemEntries(OutputDirectory).Select(Path.GetFileName));
     }
 
     [Fact]

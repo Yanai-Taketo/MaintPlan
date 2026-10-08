@@ -398,7 +398,6 @@ public static class ResultTables
         return items.Count == 0 ? CellText.None : $"足りない単価:{string.Join("、", items)}";
     }
 
-    /// <summary>山積みの表の項目。Kind の金額の種類で集計した結果の欄。</summary>
     /// <summary>
     /// 金額の種類ごとの結果が、その金額の種類で、同じ状態と費用区分の条件で集計したものかを確かめる。違えば例外にする。
     /// </summary>
@@ -418,6 +417,7 @@ public static class ResultTables
         }
     }
 
+    /// <summary>山積みの表の項目。Kind の金額の種類で集計した結果の欄。</summary>
     private sealed record AggregationEntry(AmountKind Kind, AggregationCell Cell);
 
     /// <summary>月ごとの値の表の項目。金額(Kind が金額の種類)か人工(Kind が null)のどちらか。</summary>

@@ -86,7 +86,7 @@ public static class PlanCsvReader
             {
                 Id = row.Int("ID"),
                 CostItemId = row.Int("費用内訳ID"),
-                Kind = OverrideKind(row),
+                Kind = row.Choice<AmountKind>("金額の種類", [AmountKind.Budget, AmountKind.Estimate]),
                 Month = row.Month("年月"),
                 Amount = row.Amount("金額"),
                 IsDeleted = row.Bool(Deleted),
@@ -140,18 +140,6 @@ public static class PlanCsvReader
     {
         var result = Read(folderPath);
         return result.Plan ?? throw result.Errors[0];
-    }
-
-    /// <summary>月別修正の金額の種類。実績額は形の違う値とする。</summary>
-    private static AmountKind OverrideKind(CsvRowReader row)
-    {
-        var kind = row.Choice<AmountKind>("金額の種類");
-        if (kind == AmountKind.Actual)
-        {
-            row.Report("金額の種類", "月別修正の金額の種類は、予算額か見積額です。");
-        }
-
-        return kind;
     }
 
     /// <summary>1つのフォルダの CSV を、テーブルごとに読む。形の違う値と、行のファイルでの場所を集める。</summary>

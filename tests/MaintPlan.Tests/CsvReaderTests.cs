@@ -109,6 +109,16 @@ public sealed class CsvReaderTests : IDisposable
     }
 
     [Fact]
+    public void Override_kind_lists_only_budget_and_estimate()
+    {
+        ReplaceFirstRowCell("月別修正", "金額の種類", "実績額");
+
+        Assert.Equal(
+            "月別修正.csv 2行目 列「金額の種類」: 「実績額」は予算額・見積額のどれかではありません。",
+            Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
+    [Fact]
     public void File_problems_of_all_tables_are_collected()
     {
         File.Delete(Path.Combine(directory, "実績.csv"));

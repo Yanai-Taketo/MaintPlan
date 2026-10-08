@@ -47,7 +47,7 @@ public static class ConsoleApp
             return UsageError;
         }
 
-        if (File.Exists(arguments.OutputPath))
+        if (File.Exists(Path.TrimEndingDirectorySeparator(arguments.OutputPath)))
         {
             error.WriteLine($"出力先にはフォルダを指定します。同じ名前のファイルがあります: {arguments.OutputPath}");
             return UsageError;
@@ -139,11 +139,16 @@ public static class ConsoleApp
     }
 
     /// <summary>
-    /// 上書きするファイルが、ほかで(Excel などで)開かれていないことを確かめる。開けないファイルがあれば IOException にする。
-    /// 一部のファイルだけが新しい結果になるのを防ぐため、書き始める前にすべてを確かめる。
+    /// 上書きするファイルが、ほかで(Excel などで)開かれていないことと、書き出すファイルと同じ名前のフォルダがないことを確かめる。
+    /// 当たるものがあれば IOException にする。一部のファイルだけが新しい結果になるのを防ぐため、書き始める前にすべてを確かめる。
     /// </summary>
     private static void EnsureNotInUse(IEnumerable<string> filePaths)
     {
+        foreach (var filePath in filePaths.Where(Directory.Exists))
+        {
+            throw new IOException($"{Path.GetFileName(filePath)} と同じ名前のフォルダがあります。");
+        }
+
         foreach (var filePath in filePaths.Where(File.Exists))
         {
             try

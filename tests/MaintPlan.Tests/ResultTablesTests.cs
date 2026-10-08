@@ -58,6 +58,18 @@ public class ResultTablesTests
     }
 
     [Fact]
+    public void Changing_the_caller_set_after_aggregation_does_not_change_the_condition()
+    {
+        var statuses = AllStatuses();
+        var budget = Aggregate(AmountKind.Budget, statuses, BothCategories());
+        statuses.Remove(WorkStatus.Planning);
+        var estimate = Aggregate(AmountKind.Estimate, statuses, BothCategories());
+        var results = new Dictionary<AmountKind, AggregationResult> { [AmountKind.Budget] = budget, [AmountKind.Estimate] = estimate };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+    }
+
+    [Fact]
     public void Results_with_the_same_condition_are_accepted()
     {
         var results = new Dictionary<AmountKind, AggregationResult>
