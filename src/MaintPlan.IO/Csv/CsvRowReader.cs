@@ -4,8 +4,10 @@ using MaintPlan.Core.Model;
 
 namespace MaintPlan.IO.Csv;
 
-/// <summary>表の1行から、決まった形の値を読む。形が違えば CsvFormatException を投げる。</summary>
-internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row)
+/// <summary>
+/// 表の1行から、決まった形の値を読む。形が違う値は、ファイル・行・列を持つ CsvFormatException を errors に足し、その項目は既定値として読む。
+/// </summary>
+internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row, ICollection<CsvFormatException> errors)
 {
     public int Int(string column) => Required(column, OptionalInt);
 
@@ -46,12 +48,21 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row)
         where T : struct, Enum =>
         Parse<T>(column, text => Labels.TryParse<T>(text, out var value) ? value : null, string.Join("・", Labels.All<T>()) + "のどれか");
 
+    /// <summary>選択項目のうち、allowed の値だけを受け付ける。</summary>
+    public T Choice<T>(string column, IReadOnlyList<T> allowed)
+        where T : struct, Enum =>
+        Required(column, name => Parse<T>(
+            name,
+            text => Labels.TryParse<T>(text, out var value) && allowed.Contains(value) ? value : null,
+            string.Join("・", allowed.Select(Labels.Of)) + "のどれか"));
+
     public string Text(string column) => Required(column, OptionalText);
 
     public string? OptionalText(string column) => Cell(column) is { Length: > 0 } text ? text : null;
 
-    public CsvFormatException Error(string column, string message) =>
-        new(table.FilePath, row.LineNumber, column, message);
+    /// <summary>形の違う値として errors に足す。</summary>
+    private void Report(string column, string message) =>
+        errors.Add(new CsvFormatException(table.FilePath, row.LineNumber, column, message));
 
     private string Cell(string column)
     {
@@ -73,15 +84,37 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row)
             return null;
         }
 
-        return parse(text) ?? throw Error(column, $"「{text}」は{expected}ではありません。");
+        if (parse(text) is { } value)
+        {
+            return value;
+        }
+
+        Report(column, $"「{text}」は{expected}ではありません。");
+        return null;
     }
 
     private T Required<T>(string column, Func<string, T?> read)
-        where T : struct =>
-        read(column) ?? throw Error(column, "空欄にできません。");
+        where T : struct
+    {
+        if (Cell(column).Length == 0)
+        {
+            Report(column, "空欄にできません。");
+            return default;
+        }
 
-    private string Required(string column, Func<string, string?> read) =>
-        read(column) ?? throw Error(column, "空欄にできません。");
+        return read(column) ?? default;
+    }
+
+    private string Required(string column, Func<string, string?> read)
+    {
+        if (read(column) is { } text)
+        {
+            return text;
+        }
+
+        Report(column, "空欄にできません。");
+        return string.Empty;
+    }
 
     private static long? ParseTenths(string text)
     {

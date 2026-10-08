@@ -18,6 +18,9 @@ public sealed partial class ConsoleAppTests : IDisposable
     /// <summary>確認用コンソールが書き出す表。ファイル名は、期待値の種類の名前と同じ。</summary>
     private static readonly string[] WrittenKinds = ["月ごとの値", "予算額の初期値", "山積み", "人工の内訳", "残予算と見込み残", "計算に使わない修正"];
 
+    /// <summary>書き出す表のうち、含める状態と費用区分の条件を当てない表。</summary>
+    private static readonly string[] UnconditionedKinds = ["月ごとの値", "予算額の初期値", "残予算と見込み残", "計算に使わない修正"];
+
     private const string MissingAmountKind = "未入力の件数";
 
     private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
@@ -36,6 +39,12 @@ public sealed partial class ConsoleAppTests : IDisposable
     public static TheoryData<string, string> WrittenExpectedFiles =>
         [.. TestCases.All.SelectMany(testCase => testCase.ExpectedFileNames
             .Where(fileName => WrittenKinds.Contains(KindNameOf(fileName)))
+            .Select(fileName => (testCase.Id, fileName)))];
+
+    /// <summary>集計の条件(状態・費用区分)を当てない表の期待値ファイル。</summary>
+    public static TheoryData<string, string> UnconditionedExpectedFiles =>
+        [.. TestCases.All.SelectMany(testCase => testCase.ExpectedFileNames
+            .Where(fileName => UnconditionedKinds.Contains(KindNameOf(fileName)))
             .Select(fileName => (testCase.Id, fileName)))];
 
     /// <summary>未入力の件数の期待値ファイル。</summary>
@@ -70,6 +79,24 @@ public sealed partial class ConsoleAppTests : IDisposable
         var shown = ShownMissingAmounts(run.Output);
         Assert.Equal(["予算額", "見積額"], shown.Rows.Select(row => row[0]));
         AssertMatches(expected, shown);
+    }
+
+    [Theory]
+    [MemberData(nameof(UnconditionedExpectedFiles))]
+    public void Statuses_and_categories_do_not_apply_to_other_tables(string caseId, string fileName)
+    {
+        var testCase = TestCases.Get(caseId);
+        var expected = ExpectedTable.Load(Path.Combine(testCase.ExpectedDirectory, fileName));
+        List<string> args = [ConsoleArguments.Input, testCase.InputDirectory, ConsoleArguments.Output, OutputDirectory, ConsoleArguments.StatusesOption, "承認済み", ConsoleArguments.CategoriesOption, "設備投資"];
+        if (testCase.Properties.ContainsKey("集計基準日"))
+        {
+            args.AddRange([ConsoleArguments.BaseDateOption, testCase.BaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)]);
+        }
+
+        var run = Run([.. args]);
+
+        Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+        AssertMatches(expected, ReadWritten(expected.Kind.Name));
     }
 
     [Fact]
@@ -256,6 +283,30 @@ public sealed partial class ConsoleAppTests : IDisposable
     }
 
     [Fact]
+    public void Output_with_a_trailing_separator_must_not_be_a_file()
+    {
+        Directory.CreateDirectory(directory);
+        var output = Path.Combine(directory, "出力.csv");
+        File.WriteAllText(output, string.Empty);
+
+        var run = Run([ConsoleArguments.Input, TestCases.Get("例12/条件1").InputDirectory, ConsoleArguments.Output, output + Path.DirectorySeparatorChar]);
+
+        Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
+    }
+
+    [Fact]
+    public void Nothing_is_written_when_a_folder_has_the_name_of_an_output_file()
+    {
+        Directory.CreateDirectory(Path.Combine(OutputDirectory, "山積み.csv"));
+
+        var run = Run(ArgumentsOf(TestCases.Get("例12/条件1")));
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.Equal("書き出せません: 山積み.csv と同じ名前のフォルダがあります。", Lines(run.Error)[0]);
+        Assert.Equal(["山積み.csv"], Directory.EnumerateFileSystemEntries(OutputDirectory).Select(Path.GetFileName));
+    }
+
+    [Fact]
     public void Nothing_is_overwritten_when_an_output_file_is_in_use()
     {
         var testCase = TestCases.Get("例12/条件1");
@@ -287,20 +338,63 @@ public sealed partial class ConsoleAppTests : IDisposable
     }
 
     [Fact]
-    public void Calculation_error_is_reported_and_nothing_is_written()
+    public void All_read_errors_are_reported_and_nothing_is_written()
     {
         var input = CopyInput("例01-04/基本");
-        File.AppendAllText(Path.Combine(input, "予算年割.csv"), "6,1,2026,1,いいえ\n");
+        ReplaceLine(Path.Combine(input, "予算年割.csv"), 3, "2,1,20x7,1731324,いいえ");
+        ReplaceLine(Path.Combine(input, "工事.csv"), 4, "3,例3,冷却塔補修,計画ちゅう,,,2027,,,,,,,,いいえ");
 
         var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
 
         Assert.Equal(ConsoleApp.Failed, run.ExitCode);
-        Assert.StartsWith("計算できません: ", Lines(run.Error)[0], StringComparison.Ordinal);
+        Assert.Equal(
+            [
+                "読み込めません: 工事.csv 4行目 列「状態」: 「計画ちゅう」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。",
+                "読み込めません: 予算年割.csv 3行目 列「年度」: 「20x7」は西暦4桁の年度ではありません。",
+                "2件の誤りがあるため、表を書き出していません。",
+            ],
+            Lines(run.Error.TrimEnd()));
         Assert.False(Directory.Exists(OutputDirectory));
     }
 
     [Fact]
-    public void Calculation_error_in_a_later_table_keeps_previous_results()
+    public void Input_violations_are_reported_with_line_and_nothing_is_written()
+    {
+        var input = CopyInput("例01-04/基本");
+        File.AppendAllText(Path.Combine(input, "予算年割.csv"), "6,1,2026,1,いいえ\n");
+        File.AppendAllText(Path.Combine(input, "工事.csv"), "1,例9,ポンプ更新,施工中,2027-02-10,2027-05-24,,,,,,,,,いいえ\n");
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.Equal(
+            [
+                "決まりに合いません: 工事.csv 6行目 列「ID」: ID 1 が重複しています。最初の行は2行目です。",
+                "決まりに合いません: 予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 1 と年度 2026 の組み合わせが重複しています。最初の行は2行目です。",
+                "2件の誤りがあるため、表を書き出していません。",
+            ],
+            Lines(run.Error.TrimEnd()));
+        Assert.False(Directory.Exists(OutputDirectory));
+    }
+
+    [Fact]
+    public void Save_violation_is_reported_with_line_and_nothing_is_written()
+    {
+        // 設計書4章の例14の#9:2027年度の修正の合計1,000,000が年割額900,000を超える
+        var run = Run([ConsoleArguments.Input, TestCases.Get("例14/変更09").InputDirectory, ConsoleArguments.Output, OutputDirectory]);
+
+        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
+        Assert.Equal(
+            [
+                "保存できません: 予算年割.csv 2行目 列「予算額」: 2027年度の予算額の修正の合計 1,000,000 が、年割額 900,000 を超えています。",
+                "1件の誤りがあるため、表を書き出していません。",
+            ],
+            Lines(run.Error.TrimEnd()));
+        Assert.False(Directory.Exists(OutputDirectory));
+    }
+
+    [Fact]
+    public void Input_violation_keeps_previous_results()
     {
         var input = CopyInput("例01-04/基本");
         var first = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory, ConsoleArguments.AmountKindOption, "見積額"]);
@@ -310,21 +404,10 @@ public sealed partial class ConsoleAppTests : IDisposable
 
         Assert.Equal(ConsoleApp.Succeeded, first.ExitCode);
         Assert.Equal(ConsoleApp.Failed, second.ExitCode);
-        Assert.StartsWith("計算できません: ", Lines(second.Error)[0], StringComparison.Ordinal);
+        Assert.Equal(
+            "決まりに合いません: 予算枠.csv 5行目 列「年度」「費用区分」: 年度 2026 と費用区分「修繕費」の組み合わせが重複しています。最初の行は2行目です。",
+            Lines(second.Error)[0]);
         Assert.Equal(["欄", "見積額", "人工"], ReadWritten("山積み").Columns);
-    }
-
-    [Fact]
-    public void Duplicate_id_is_reported_as_calculation_error()
-    {
-        var input = CopyInput("例01-04/基本");
-        File.AppendAllText(Path.Combine(input, "工事.csv"), "1,例9,ポンプ更新,施工中,2027-02-10,2027-05-24,,,,,,,,,いいえ\n");
-
-        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, OutputDirectory]);
-
-        Assert.Equal(ConsoleApp.Failed, run.ExitCode);
-        Assert.StartsWith("計算できません: ", Lines(run.Error)[0], StringComparison.Ordinal);
-        Assert.False(Directory.Exists(OutputDirectory));
     }
 
     [Fact]
