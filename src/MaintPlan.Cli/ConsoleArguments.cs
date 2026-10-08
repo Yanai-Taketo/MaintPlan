@@ -34,7 +34,7 @@ public sealed record ConsoleArguments(
         Environment.NewLine,
         "使い方: MaintPlan.Cli --input <入力のフォルダ> --output <出力先のフォルダ> [集計の条件]",
         "",
-        "  --input        9つのテーブルの CSV を置いたフォルダ",
+        "  --input        9つのテーブルの CSV を置いたフォルダ。決まりに合わない行があれば、行を示して書き出さない",
         "  --output       結果の表の CSV を書き出すフォルダ。なければ作り、同じ名前のファイルは上書きする",
         "",
         "集計の条件(省いたときの値)",

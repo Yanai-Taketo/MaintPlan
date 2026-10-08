@@ -1,0 +1,248 @@
+using System.Text;
+using MaintPlan.Core.Calculation;
+using MaintPlan.Core.Model;
+using MaintPlan.IO.Csv;
+using MaintPlan.IO.Input;
+using MaintPlan.Tests.Support;
+
+namespace MaintPlan.Tests;
+
+/// <summary>
+/// 入力の確認で、3章の決まり・参照先・保存できない条件に合わない行を、ファイル・行・列とともにすべて示すことを確かめる。
+/// 決まりの確認は、例01-04の入力を写して変え、期待する行と理由を、変えた内容と3章の決まりから決める。
+/// 保存できない条件は、設計書4章の例14の表で確かめる。例14の入力は、どのファイルも行が1つなので、示す行は2行目になる。
+/// </summary>
+public sealed class InputValidationTests : IDisposable
+{
+    /// <summary>設計書4章の例14で、保存できないケース。</summary>
+    private static readonly string[] CasesThatCannotBeSaved =
+        ["例14/変更01", "例14/変更02", "例14/変更03", "例14/変更05", "例14/変更06", "例14/変更08", "例14/変更09", "例14/変更10"];
+
+    private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
+
+    public InputValidationTests()
+    {
+        Directory.CreateDirectory(directory);
+        foreach (var file in Directory.EnumerateFiles(TestCases.Get("例01-04/基本").InputDirectory))
+        {
+            File.Copy(file, Path.Combine(directory, Path.GetFileName(file)));
+        }
+    }
+
+    public void Dispose() => Directory.Delete(directory, recursive: true);
+
+    public static TheoryData<string> CasesThatCanBeSaved => [.. TestCases.All.Select(testCase => testCase.Id).Except(CasesThatCannotBeSaved)];
+
+    [Theory]
+    [MemberData(nameof(CasesThatCanBeSaved))]
+    public void Inputs_of_examples_have_no_violations(string caseId)
+    {
+        var plan = PlanCsvReader.ReadFolder(TestCases.Get(caseId).InputDirectory);
+
+        Assert.Empty(InputValidation.Validate(plan).Violations);
+    }
+
+    [Theory]
+    // #1 作業明細の期間を2027-06-15〜2027-07-10にする
+    [InlineData("例14/変更01", SaveViolationKind.LaborLineOutsidePeriod, "作業明細.csv 2行目 列「開始日」「終了日」: 作業明細の期間 2027-06-15〜2027-07-10 が、工期 2027-04-01〜2027-06-30 の外にあります。")]
+    // #2 工事の開始日と終了日を空欄にする
+    [InlineData("例14/変更02", SaveViolationKind.LaborLineDatedWithoutWorkDates, "作業明細.csv 2行目 列「開始日」「終了日」: 工事の日付が空欄で、作業明細に日付があります。")]
+    // #3 工期を2027-05-15〜2027-08-31にする
+    [InlineData("例14/変更03", SaveViolationKind.LaborLineOutsidePeriod, "作業明細.csv 2行目 列「開始日」「終了日」: 作業明細の期間 2027-05-01〜2027-05-31 が、工期 2027-05-15〜2027-08-31 の外にあります。")]
+    // #5 修正の合計1,000,000が見積額900,000を超える
+    [InlineData("例14/変更05", SaveViolationKind.EstimateOverridesExceed, "費用内訳.csv 2行目 列「見積額」: 見積額の修正の合計 1,000,000 が、見積額 900,000 を超えています。")]
+    // #6 全部の月を修正し、合計800,000が見積額と一致しない
+    [InlineData("例14/変更06", SaveViolationKind.EstimateOverridesMismatch, "費用内訳.csv 2行目 列「見積額」: 見積額の全部の月を修正していて、修正の合計 800,000 が見積額 900,000 と一致しません。")]
+    // #8 修正の合計300,000が見積額(250,000)を超える
+    [InlineData("例14/変更08", SaveViolationKind.EstimateOverridesExceed, "費用内訳.csv 2行目 列「見積額」: 見積額の修正の合計 300,000 が、見積額 250,000 を超えています。")]
+    // #9 2027年度の修正の合計1,000,000が年割額900,000を超える
+    [InlineData("例14/変更09", SaveViolationKind.BudgetOverridesExceed, "予算年割.csv 2行目 列「予算額」: 2027年度の予算額の修正の合計 1,000,000 が、年割額 900,000 を超えています。")]
+    // #10 修正の合計400,000が年割額(2027年度 300,000)を超える
+    [InlineData("例14/変更10", SaveViolationKind.BudgetOverridesExceed, "予算年割.csv 2行目 列「予算額」: 2027年度の予算額の修正の合計 400,000 が、年割額 300,000 を超えています。")]
+    public void Save_violation_is_shown_at_its_row(string caseId, SaveViolationKind kind, string text)
+    {
+        var read = PlanCsvReader.Read(TestCases.Get(caseId).InputDirectory);
+
+        var violation = Assert.Single(InputValidation.Validate(read.Plan!).Violations);
+
+        Assert.Equal(InputViolationKind.CannotSave, violation.Kind);
+        Assert.Equal(kind, violation.SaveViolation?.Kind);
+        Assert.Equal(text, InputViolationText.Describe(violation, read.Source!));
+    }
+
+    [Theory]
+    // ID は、削除済みの行も含めて重複なし
+    [InlineData("工事", "1,例9,ポンプ更新,施工中,2027-02-10,2027-05-24,,,,,,,,,はい",
+        "工事.csv 6行目 列「ID」: ID 1 が重複しています。最初の行は2行目です。")]
+    // 管理番号は、削除済みの行も含めて重複なし
+    [InlineData("工事", "5,例1,ポンプ更新,施工中,2027-02-10,2027-05-24,,,,,,,,,はい",
+        "工事.csv 6行目 列「管理番号」: 管理番号「例1」が重複しています。最初の行は2行目です。")]
+    // 1件の工事に同じ費用区分は1件まで
+    [InlineData("費用内訳", "5,1,修繕費,出来高,,100,,,いいえ",
+        "費用内訳.csv 6行目 列「工事ID」「費用区分」: 工事ID 1 と費用区分「修繕費」の組み合わせが重複しています。最初の行は2行目です。")]
+    // 1件の費用内訳に同じ年度は1件まで
+    [InlineData("予算年割", "6,1,2026,1,いいえ",
+        "予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 1 と年度 2026 の組み合わせが重複しています。最初の行は2行目です。")]
+    // 費用内訳・金額の種類・年月の組み合わせで1件
+    [InlineData("月別修正", "2,1,見積額,2027-03,100,いいえ",
+        "月別修正.csv 3行目 列「費用内訳ID」「金額の種類」「年月」: 費用内訳ID 1・金額の種類「見積額」・年月 2027-03 の組み合わせが重複しています。最初の行は2行目です。")]
+    // 種別と区分名の組み合わせで重複なし
+    [InlineData("人員区分", "3,直営,一般,はい,3,はい,いいえ",
+        "人員区分.csv 4行目 列「種別」「区分名」: 種別「直営」と区分名「一般」の組み合わせが重複しています。最初の行は2行目です。")]
+    // 人員区分と年度の組み合わせで1件
+    [InlineData("単価", "5,1,2027,1,いいえ",
+        "単価.csv 6行目 列「人員区分ID」「年度」: 人員区分ID 1 と年度 2027 の組み合わせが重複しています。最初の行は3行目です。")]
+    // 年度と費用区分の組み合わせで1件
+    [InlineData("予算枠", "4,2027,設備投資,1,いいえ",
+        "予算枠.csv 5行目 列「年度」「費用区分」: 年度 2027 と費用区分「設備投資」の組み合わせが重複しています。最初の行は4行目です。")]
+    public void Duplicate_is_shown_at_the_later_row(string table, string line, string text)
+    {
+        AppendLine(table, line);
+
+        Assert.Equal([text], Describe());
+    }
+
+    [Fact]
+    public void Work_number_is_unique_when_entered()
+    {
+        AppendLine("費用内訳", "5,2,修繕費,出来高,W-1,,,,いいえ");
+        AppendLine("費用内訳", "6,3,設備投資,出来高,W-1,,,,いいえ");
+        AppendLine("費用内訳", "7,4,設備投資,出来高,,,,,いいえ");
+
+        Assert.Equal(["費用内訳.csv 7行目 列「工事番号」: 工事番号「W-1」が重複しています。最初の行は6行目です。"], Describe());
+    }
+
+    [Theory]
+    [InlineData("費用内訳", "5,1,修繕費,出来高,,100,,,はい")]
+    [InlineData("予算年割", "6,1,2026,1,はい")]
+    [InlineData("月別修正", "2,1,見積額,2027-03,100,はい")]
+    [InlineData("人員区分", "3,直営,一般,はい,3,はい,はい")]
+    [InlineData("単価", "5,1,2027,1,はい")]
+    [InlineData("予算枠", "4,2027,設備投資,1,はい")]
+    public void Deleted_rows_are_not_counted_for_combinations(string table, string line)
+    {
+        AppendLine(table, line);
+
+        Assert.Empty(Describe());
+    }
+
+    [Theory]
+    [InlineData("工事", 2, "終了日", "", "工事.csv 2行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。")]
+    [InlineData("作業明細", 3, "開始日", "", "作業明細.csv 3行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。")]
+    [InlineData("工事", 5, "終了日", "2026-10-31", "工事.csv 5行目 列「開始日」「終了日」: 終了日 2026-10-31 が開始日 2026-11-01 より前です。")]
+    [InlineData("作業明細", 2, "終了日", "2027-02-28", "作業明細.csv 2行目 列「開始日」「終了日」: 終了日 2027-02-28 が開始日 2027-03-01 より前です。")]
+    public void Wrong_dates_are_shown(string table, int lineNumber, string column, string value, string text)
+    {
+        ReplaceCell(table, lineNumber, column, value);
+
+        Assert.Equal([text], Describe());
+    }
+
+    [Fact]
+    public void Dates_of_deleted_rows_are_not_checked()
+    {
+        ReplaceCell("作業明細", 3, "開始日", "");
+        ReplaceCell("作業明細", 3, PlanCsvReader.Deleted, "はい");
+
+        Assert.Empty(Describe());
+    }
+
+    [Theory]
+    [InlineData("費用内訳", "工事ID", "費用内訳.csv 2行目 列「工事ID」: 工事ID 9 に当たる工事の行がありません。")]
+    [InlineData("予算年割", "費用内訳ID", "予算年割.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。")]
+    [InlineData("実績", "費用内訳ID", "実績.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。")]
+    [InlineData("月別修正", "費用内訳ID", "月別修正.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。")]
+    [InlineData("作業明細", "費用内訳ID", "作業明細.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。")]
+    [InlineData("作業明細", "人員区分ID", "作業明細.csv 2行目 列「人員区分ID」: 人員区分ID 9 に当たる人員区分の行がありません。")]
+    [InlineData("単価", "人員区分ID", "単価.csv 2行目 列「人員区分ID」: 人員区分ID 9 に当たる人員区分の行がありません。")]
+    public void Missing_reference_is_shown(string table, string column, string text)
+    {
+        ReplaceCell(table, 2, column, "9");
+
+        Assert.Equal([text], Describe());
+    }
+
+    [Fact]
+    public void Missing_reference_of_a_deleted_row_is_shown()
+    {
+        ReplaceCell("実績", 2, "費用内訳ID", "9");
+        ReplaceCell("実績", 2, PlanCsvReader.Deleted, "はい");
+
+        Assert.Equal(["実績.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。"], Describe());
+    }
+
+    [Theory]
+    [InlineData("工事")]
+    [InlineData("費用内訳")]
+    [InlineData("人員区分")]
+    public void Rows_may_refer_to_deleted_rows(string table)
+    {
+        ReplaceCell(table, 2, PlanCsvReader.Deleted, "はい");
+
+        Assert.Empty(Describe());
+    }
+
+    [Fact]
+    public void Override_of_actual_amount_is_shown()
+    {
+        var plan = PlanCsvReader.ReadFolder(directory);
+        plan = plan with { MonthlyOverrides = [plan.MonthlyOverrides[0] with { Kind = AmountKind.Actual }] };
+
+        var violation = Assert.Single(InputValidation.Validate(plan).Violations);
+
+        Assert.Equal((InputViolationKind.InvalidOverrideKind, PlanTable.MonthlyOverride, 0), (violation.Kind, violation.Table, violation.RowIndex));
+        Assert.Equal(["金額の種類"], violation.Columns);
+    }
+
+    [Fact]
+    public void All_violations_are_shown_in_table_and_row_order()
+    {
+        AppendLine("予算年割", "6,1,2026,1,いいえ");
+        AppendLine("月別修正", "2,4,見積額,2026-11,1000000,いいえ");
+        ReplaceCell("工事", 5, "終了日", "");
+
+        Assert.Equal(
+        [
+            "工事.csv 5行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。",
+            "予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 1 と年度 2026 の組み合わせが重複しています。最初の行は2行目です。",
+        ], Describe());
+    }
+
+    [Fact]
+    public void Save_conditions_are_checked_for_cost_items_without_other_violations()
+    {
+        // 費用内訳1は年割が重複しているため確かめず、費用内訳4の見積額の修正の合計 1,000,000 が見積額 900,000 を超えることを示す。
+        AppendLine("予算年割", "6,1,2026,1,いいえ");
+        AppendLine("月別修正", "2,4,見積額,2026-11,1000000,いいえ");
+        AppendLine("月別修正", "3,1,見積額,2027-04,9000000,いいえ");
+
+        Assert.Equal(
+        [
+            "費用内訳.csv 5行目 列「見積額」: 見積額の修正の合計 1,000,000 が、見積額 900,000 を超えています。",
+            "予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 1 と年度 2026 の組み合わせが重複しています。最初の行は2行目です。",
+        ], Describe());
+    }
+
+    /// <summary>入力を読んで確かめ、違反を文にして返す。</summary>
+    private List<string> Describe()
+    {
+        var read = PlanCsvReader.Read(directory);
+        Assert.Empty(read.Errors);
+        return [.. InputValidation.Validate(read.Plan!).Violations.Select(violation => InputViolationText.Describe(violation, read.Source!))];
+    }
+
+    private void AppendLine(string table, string line) =>
+        File.AppendAllText(Path.Combine(directory, table + ".csv"), line + "\n", new UTF8Encoding(false));
+
+    /// <summary>ファイルの lineNumber 行目(1行目が列名)の、column の列の値を置き換える。</summary>
+    private void ReplaceCell(string table, int lineNumber, string column, string value)
+    {
+        var path = Path.Combine(directory, table + ".csv");
+        var lines = File.ReadAllText(path).Split('\n').ToList();
+        var header = lines[0].TrimStart('﻿').Split(',');
+        var cells = lines[lineNumber - 1].Split(',');
+        cells[Array.IndexOf(header, column)] = value;
+        lines[lineNumber - 1] = string.Join(',', cells);
+        File.WriteAllText(path, string.Join('\n', lines), new UTF8Encoding(true));
+    }
+}

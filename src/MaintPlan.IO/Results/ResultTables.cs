@@ -184,7 +184,7 @@ public static class ResultTables
 
     /// <summary>
     /// 山積み(欄・予算額・見積額・実績額・人工)。金額の列は、それぞれの金額の種類で集計した結果から作る。行は、どれかの結果にある欄ごとに置く。
-    /// 人工は金額の種類によらないため、渡された結果のどれから取っても同じになる。食い違うときは、集計の条件の違う結果が渡されたものとして例外にする。
+    /// 結果は、同じ状態と費用区分の条件で集計したものを渡す。条件が違うときと、人工が食い違うとき(違う入力から集計した結果を渡したとき)は例外にする。
     /// </summary>
     public static TextTable Aggregation(IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns)
     {
@@ -199,6 +199,7 @@ public static class ResultTables
             throw new ArgumentException($"列「{string.Join("」「", absent.Select(Labels.Of))}」の金額の種類で集計した結果がありません。", nameof(results));
         }
 
+        EnsureSameCondition(results);
         var manDays = results
             .OrderBy(pair => pair.Key)
             .Select(pair => pair.Value.Cells.ToDictionary(cell => cell.Column, cell => cell.ManDaysTenths))
@@ -206,7 +207,7 @@ public static class ResultTables
         var reference = manDays.FirstOrDefault() ?? [];
         if (manDays.Skip(1).Any(other => other.Keys.Union(reference.Keys).Any(column => other.GetValueOrDefault(column) != reference.GetValueOrDefault(column))))
         {
-            throw new ArgumentException("金額の種類ごとの結果で、人工が食い違っています。集計の条件(状態・費用区分)が同じ結果を渡します。", nameof(results));
+            throw new ArgumentException("金額の種類ごとの結果で、人工が食い違っています。同じ入力から集計した結果を渡します。", nameof(results));
         }
 
         return GroupedTable.Build(
@@ -250,6 +251,7 @@ public static class ResultTables
     /// <summary>
     /// 未入力の件数(金額の種類・件数・対象)。予算額と見積額の結果ごとに、0件でも1行置く。実績額は未入力にならないため、行を置かない。
     /// 件数は未入力の費用内訳の数とし、対象は、その費用内訳の工事の管理番号を、工事の順に重複なしで「、」でつなぐ。
+    /// 結果は、同じ状態と費用区分の条件で集計したものを渡す。条件が違うときは例外にする。
     /// </summary>
     public static TextTable MissingAmounts(PlanData plan, IReadOnlyDictionary<AmountKind, AggregationResult> results, IReadOnlyList<string> columns)
     {
@@ -257,6 +259,8 @@ public static class ResultTables
         {
             throw new ArgumentException("「未入力の件数」には「金額の種類」の列を置きます。", nameof(columns));
         }
+
+        EnsureSameCondition(results);
 
         var index = new PlanIndex(plan);
         return GroupedTable.Build(
@@ -395,6 +399,25 @@ public static class ResultTables
     }
 
     /// <summary>山積みの表の項目。Kind の金額の種類で集計した結果の欄。</summary>
+    /// <summary>
+    /// 金額の種類ごとの結果が、その金額の種類で、同じ状態と費用区分の条件で集計したものかを確かめる。違えば例外にする。
+    /// </summary>
+    private static void EnsureSameCondition(IReadOnlyDictionary<AmountKind, AggregationResult> results)
+    {
+        var mislabeled = results.Where(pair => pair.Value.Condition.AmountKind != pair.Key).Select(pair => pair.Key).Order().ToList();
+        if (mislabeled.Count > 0)
+        {
+            throw new ArgumentException($"「{string.Join("」「", mislabeled.Select(Labels.Of))}」に、ほかの金額の種類で集計した結果が渡されています。", nameof(results));
+        }
+
+        var reference = results.OrderBy(pair => pair.Key).Select(pair => pair.Value.Condition).FirstOrDefault();
+        if (reference is not null && results.Values.Any(result =>
+            !result.Condition.Statuses.SetEquals(reference.Statuses) || !result.Condition.Categories.SetEquals(reference.Categories)))
+        {
+            throw new ArgumentException("金額の種類ごとの結果で、集計の条件(状態・費用区分)が違います。同じ条件で集計した結果を渡します。", nameof(results));
+        }
+    }
+
     private sealed record AggregationEntry(AmountKind Kind, AggregationCell Cell);
 
     /// <summary>月ごとの値の表の項目。金額(Kind が金額の種類)か人工(Kind が null)のどちらか。</summary>
