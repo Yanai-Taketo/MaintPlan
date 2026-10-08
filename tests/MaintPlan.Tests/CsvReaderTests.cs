@@ -145,15 +145,15 @@ public sealed class CsvReaderTests : IDisposable
 
     private void ReplaceFirstRowCell(string table, string column, string value) => ReplaceCell(table, 2, column, value);
 
-    /// <summary>ファイルの lineNumber 行目(1行目が列名)の、column の列の値を置き換える。</summary>
+    /// <summary>ファイルの lineNumber 行目(1行目が列名)の、column の列の値を置き換える。改行は CRLF でも LF でもよい。</summary>
     private void ReplaceCell(string table, int lineNumber, string column, string value)
     {
         var path = Path.Combine(directory, table + ".csv");
-        var lines = File.ReadAllText(path).Split('\n').ToList();
-        var header = lines[0].TrimStart('﻿').Split(',');
+        var lines = File.ReadAllLines(path);
+        var header = lines[0].TrimStart('\ufeff').Split(',');
         var cells = lines[lineNumber - 1].Split(',');
         cells[Array.IndexOf(header, column)] = value;
         lines[lineNumber - 1] = string.Join(',', cells);
-        File.WriteAllText(path, string.Join('\n', lines), new UTF8Encoding(true));
+        File.WriteAllText(path, string.Join('\n', lines) + "\n", new UTF8Encoding(true));
     }
 }

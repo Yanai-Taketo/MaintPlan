@@ -8,7 +8,7 @@ namespace MaintPlan.Tests;
 
 /// <summary>
 /// 山積みと未入力の件数の表に、集計の条件の違う結果を混ぜて渡したときに、例外にすることを確かめる。
-/// 例13には作業明細がないため、状態や費用区分を変えても人工は変わらない。
+/// 例13には作業明細がないため、状態や費用区分を変えても人工は変わらない。人工の食い違いは、作業明細のある例12で確かめる。
 /// </summary>
 public class ResultTablesTests
 {
@@ -29,6 +29,34 @@ public class ResultTablesTests
 
         Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
         Assert.Throws<ArgumentException>(() => ResultTables.MissingAmounts(Plan, results, MissingAmountColumns));
+    }
+
+    [Fact]
+    public void Results_with_as_many_but_different_statuses_are_rejected()
+    {
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = Aggregate(AmountKind.Budget, new HashSet<WorkStatus> { WorkStatus.Planning }, BothCategories()),
+            [AmountKind.Estimate] = Aggregate(AmountKind.Estimate, new HashSet<WorkStatus> { WorkStatus.InProgress }, BothCategories()),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
+    }
+
+    [Fact]
+    public void Results_from_different_inputs_are_rejected_when_man_days_disagree()
+    {
+        // 例12には作業明細があるので、作業明細を1行除いた入力から集計すると人工が変わる。
+        var plan = PlanCsvReader.ReadFolder(TestCases.Get("例12/条件1").InputDirectory);
+        var fewer = plan with { LaborLines = [.. plan.LaborLines.Skip(1)] };
+        var condition = new AggregationCondition(AmountKind.Budget, AllStatuses(), BothCategories());
+        var results = new Dictionary<AmountKind, AggregationResult>
+        {
+            [AmountKind.Budget] = QuarterlyAggregation.Calculate(plan, condition),
+            [AmountKind.Estimate] = QuarterlyAggregation.Calculate(fewer, condition with { AmountKind = AmountKind.Estimate }),
+        };
+
+        Assert.Throws<ArgumentException>(() => ResultTables.Aggregation(results, AggregationColumns));
     }
 
     [Fact]
