@@ -260,6 +260,12 @@ public static class InputValidation
 
     private static string Text(string value) => $"「{value}」";
 
+    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
+
+    private static string Amount(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
+
+    private static string Date(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
     /// <summary>
     /// 削除済みの行と同じに扱う行。削除済みの印がある行と、削除済みの工事・費用内訳の下にある行。
     /// 工事と費用内訳は、同じ ID の行がすべて削除済みとして扱う行のときだけ、削除済みとする(計算の対象の決め方と同じ)。
@@ -285,10 +291,4 @@ public static class InputValidation
         private static HashSet<int> DeletedIds<T>(IReadOnlyList<T> rows, Func<T, int> id, Func<T, bool> isDeleted) =>
             [.. rows.GroupBy(id).Where(group => group.All(isDeleted)).Select(group => group.Key)];
     }
-
-    private static string Number(int value) => value.ToString(CultureInfo.InvariantCulture);
-
-    private static string Amount(long value) => value.ToString("N0", CultureInfo.InvariantCulture);
-
-    private static string Date(DateOnly date) => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 }

@@ -132,7 +132,7 @@ public sealed class CsvReaderTests : IDisposable
     [InlineData("作業明細", "人数", "-2", "作業明細.csv 2行目 列「人数」: 「-2」は0以上の整数ではありません。")]
     [InlineData("人員区分", "表示順", "-2", "人員区分.csv 2行目 列「表示順」: 「-2」は0以上の整数ではありません。")]
     [InlineData("作業明細", "作業日数", "-1.5", "作業明細.csv 2行目 列「作業日数」: 「-1.5」は0以上の、小数点以下1桁までの数ではありません。")]
-    public void Count_errors_say_zero_or_more(string table, string column, string value, string message)
+    public void Integer_and_work_day_errors_say_zero_or_more(string table, string column, string value, string message)
     {
         ReplaceFirstRowCell(table, column, value);
 
