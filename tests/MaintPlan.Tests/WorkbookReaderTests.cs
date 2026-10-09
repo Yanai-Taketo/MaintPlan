@@ -17,6 +17,8 @@ namespace MaintPlan.Tests;
 /// 例01-04の入力の CSV からブックを作り、セルを ClosedXML で変えて保存してから読む。期待する文は、決まりの文・利用者が決めた文言・CSV と同じ文から決め、
 /// 行は、変えた行の Excel の行番号(列名の行が1行目)を手で数える。変えていない行の行番号は、CSV のファイルの行番号と同じ。
 /// 値を変えるセルは表示の書式を決めて(省けば標準)、表示される文字が値の普通の書き方になるようにする。
+/// 表示される文字と値の違いを確かめるテスト(書式「#,##0」「0000」など)では、表示される文字を書式から手で決める。
+/// 表示される文字は ja-JP で作る決まりなので、期待する文はマシンの文化によらない(Displayed_text_does_not_depend_on_the_current_culture)。
 /// </summary>
 public sealed class WorkbookReaderTests : IDisposable
 {
@@ -139,6 +141,33 @@ public sealed class WorkbookReaderTests : IDisposable
         Assert.Empty(read.Errors);
         Assert.Equal([1, 2, 3, 4], read.Plan!.ConstructionWorks.Select(work => work.Id));
         Assert.Equal([2, 4, 6, 7], read.Source!.Tables[PlanTable.ConstructionWork].LineNumbers);
+    }
+
+    /// <summary>空の文字のセル("")は空欄なので、値のあるセルに数えない。空の文字のセルだけの行は、値のない行として読まない。</summary>
+    [Fact]
+    public void Rows_with_only_empty_text_cells_are_not_read()
+    {
+        Edit(workbook =>
+        {
+            // 3行目に行を入れ、ID・管理番号・状態・削除済みを空の文字のセルにする。工事2〜4は4〜6行目になる
+            workbook.Worksheet("工事").Row(3).InsertRowsAbove(1);
+            foreach (var column in new[] { "ID", "管理番号", "状態", "削除済み" })
+            {
+                Set(workbook, "工事", 3, column, string.Empty);
+            }
+        });
+
+        // 空の文字のセルが、保存したブックに文字のセルとして残っていること(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.True(IsEmptyText(Cell(saved, "工事", 3, "管理番号")));
+        }
+
+        var read = PlanWorkbookReader.Read(workbookPath);
+
+        Assert.Empty(read.Errors);
+        Assert.Equal([1, 2, 3, 4], read.Plan!.ConstructionWorks.Select(work => work.Id));
+        Assert.Equal([2, 4, 5, 6], read.Source!.Tables[PlanTable.ConstructionWork].LineNumbers);
     }
 
     [Fact]
@@ -286,6 +315,10 @@ public sealed class WorkbookReaderTests : IDisposable
     /// 数値のセルは、有効数字15桁に丸めてから読む。
     /// ClosedXML は保存するときに数を15桁に丸めるので、目印の数を入れて保存してから、シートの XML の値を丸める前の数(Excel が保存する17桁の形)に書き換える。
     /// </summary>
+    /// <remarks>
+    /// 文字の列(工事番号)の 123456.00000000001 は、15桁に丸めると整数の 123456 になるので「123456」と読む。
+    /// 見積額の 999999999999999.4 は、15桁に丸めると 999999999999999 で、10の15乗より小さいので受け付ける(16桁以上の数の境目)。
+    /// </remarks>
     [Fact]
     public void Numeric_cells_are_rounded_to_15_digits()
     {
@@ -294,37 +327,51 @@ public sealed class WorkbookReaderTests : IDisposable
             Set(workbook, "作業明細", 2, "作業日数", 0.111111111111111);
             Set(workbook, "作業明細", 3, "作業日数", 0.222222222222222);
             Set(workbook, "工事", 2, "ID", 0.333333333333333);
+            Set(workbook, "費用内訳", 3, "見積額", 0.444444444444444);
+            Set(workbook, "費用内訳", 2, "工事番号", 0.555555555555555);
         });
         ReplaceStoredNumbers(new Dictionary<string, string>
         {
             ["0.111111111111111"] = (0.1 + 0.2).ToString("R", CultureInfo.InvariantCulture),
             ["0.222222222222222"] = "10.500000000000002",
             ["0.333333333333333"] = "1.0000000000000002",
+            ["0.444444444444444"] = "999999999999999.4",
+            ["0.555555555555555"] = "123456.00000000001",
         });
 
         // 丸める前の値が、そのままブックに保存されていること(テストの前提)
         Assert.Equal(0.30000000000000004, Number("作業明細", 2, "作業日数"));
         Assert.Equal(10.500000000000002, Number("作業明細", 3, "作業日数"));
         Assert.Equal(1.0000000000000002, Number("工事", 2, "ID"));
+        Assert.Equal(999999999999999.4, Number("費用内訳", 3, "見積額"));
+        Assert.NotEqual(999999999999999d, Number("費用内訳", 3, "見積額"));
+        Assert.Equal(123456.00000000001, Number("費用内訳", 2, "工事番号"));
+        Assert.NotEqual(123456d, Number("費用内訳", 2, "工事番号"));
 
         var plan = PlanWorkbookReader.ReadWorkbook(workbookPath);
 
         Assert.Equal(3, plan.LaborLines[0].WorkDaysTenths);
         Assert.Equal(105, plan.LaborLines[1].WorkDaysTenths);
         Assert.Equal(1, plan.ConstructionWorks[0].Id);
+        Assert.Equal(999_999_999_999_999, plan.CostItems[1].EstimateAmount);
+        Assert.Equal("123456", plan.CostItems[0].WorkNumber);
     }
 
     /// <summary>
     /// 列に合わない数値のセルは、表示される文字で示す。数値を受け付ける列(整数・年度・金額・作業日数・文字)は、15桁に丸めた値を CSV と同じ決まりで確かめ、
-    /// 丸めた絶対値が10の15乗以上なら16桁以上の数と示す。日付・真偽・選択の列は、数値のセルを受け付けない。書式は標準。
+    /// 丸めた絶対値が10の15乗以上なら16桁以上の数と示す。日付・年月・真偽・選択の列は、数値のセルを受け付けない。書式は標準。
     /// </summary>
     [Theory]
-    // 日付の列の数値のセル。文は決まり8の例のまま
+    // 日付・年月の列の数値のセル。文は決まり8の例のまま(「は」の後に空白)。
+    // D1(利用者に確認中:決まり4の CSV と同じ文か、決まり8の例の文か)の答えが出るまで、この2行は落ちたままにする
     [InlineData("工事", "開始日", 46113d, "「46113」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("実績", "年月", 46082d, "「46082」は YYYY-MM の年月ではありません。")]
     [InlineData("作業明細", "作業日数", 10.25, "「10.25」は0以上の、小数点以下1桁までの数ではありません。")]
     [InlineData("作業明細", "人数", 1.5, "「1.5」は0以上の整数ではありません。")]
     [InlineData("予算年割", "予算額", 1.5, "「1.5」は桁区切りのない整数ではありません。")]
     [InlineData("予算年割", "年度", 27d, "「27」は西暦4桁の年度ではありません。")]
+    // 年度の列も、15桁に丸めた値が整数の数値のセルだけを受け付ける
+    [InlineData("予算年割", "年度", 2027.5, "「2027.5」は西暦4桁の年度ではありません。")]
     // 整数の列は、0以上だけを受け付ける
     [InlineData("工事", "ID", -2d, "「-2」は0以上の整数ではありません。")]
     [InlineData("費用内訳", "工事ID", -2d, "「-2」は0以上の整数ではありません。")]
@@ -341,6 +388,9 @@ public sealed class WorkbookReaderTests : IDisposable
     [InlineData("工事", "ID", 1E+15, "16桁以上の数は、文字のセルで入れてください。")]
     [InlineData("工事", "管理番号", 1E+15, "16桁以上の数は、文字のセルで入れてください。")]
     [InlineData("作業明細", "作業日数", 1E+15, "16桁以上の数は、文字のセルで入れてください。")]
+    // 数値を受け付けない列(選択・真偽)では、16桁以上の数も型の誤りとして、表示される文字(標準の書式の 1E+15 は「1E+15」)で示す
+    [InlineData("工事", "状態", 1E+15, "「1E+15」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。")]
+    [InlineData("工事", "削除済み", -1E+15, "「-1E+15」は「はい」か「いいえ」ではありません。")]
     public void Numeric_cell_that_does_not_fit_the_column_is_reported(string sheet, string column, double value, string message)
     {
         Put(sheet, 2, column, value);
@@ -349,16 +399,83 @@ public sealed class WorkbookReaderTests : IDisposable
     }
 
     /// <summary>
+    /// 誤りの文の値は、セルの値ではなく表示される文字で示す。表示される文字は、書式から手で決めた
+    /// (書式「0000」の 27 は「0027」、「0.00」の 1.5 は「1.50」、「"はい"」のような文字だけの書式の数は、その文字)。
+    /// </summary>
+    [Theory]
+    // 受け付けた数値が、CSV と同じ確かめで誤りになるとき
+    [InlineData("予算年割", "年度", 27d, "0000", "「0027」は西暦4桁の年度ではありません。")]
+    // 整数の列の、整数でない数値のセル
+    [InlineData("予算年割", "予算額", 1.5, "0.00", "「1.50」は桁区切りのない整数ではありません。")]
+    // 真偽・選択の列は、文字のセルだけを受け付ける。数値のセルは、表示される文字が正しい値に見えても誤りにし、文は CSV と同じ形にする
+    [InlineData("工事", "削除済み", 1d, "\"はい\"", "「はい」は「はい」か「いいえ」ではありません。")]
+    [InlineData("工事", "状態", 1d, "\"施工中\"", "「施工中」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。")]
+    public void Numeric_cell_with_display_format_is_reported_with_its_displayed_text(string sheet, string column, double value, string format, string message)
+    {
+        Put(sheet, 2, column, value, format);
+
+        Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: {message}", Assert.Single(Errors()));
+    }
+
+    /// <summary>
+    /// 受け付けた数値は、表示される文字ではなく、セルの値(15桁に丸めた値)から読む。
+    /// 金額・作業日数・文字の列は、表示される文字(「1,603,076」「8.50」「123,456」)を CSV の決まりで読めば誤りになる書式にする。
+    /// 文字の列の整数は、桁区切りや指数の形、「.0」を付けない数字の文字として読む(負の整数は「-」を付ける)。
+    /// </summary>
+    [Fact]
+    public void Accepted_numeric_cells_are_read_by_value()
+    {
+        Edit(workbook =>
+        {
+            Set(workbook, "予算年割", 2, "予算額", 1603076d, "#,##0");
+            Set(workbook, "作業明細", 2, "作業日数", 8.5, "0.00");
+            Set(workbook, "工事", 4, "実施年度", 2028d, "0");
+            Set(workbook, "工事", 2, "管理番号", 123456d, "#,##0");
+            Set(workbook, "工事", 3, "管理番号", 123456789012345d);
+            Set(workbook, "費用内訳", 2, "工事番号", -5d);
+        });
+
+        var plan = PlanWorkbookReader.ReadWorkbook(workbookPath);
+
+        Assert.Equal(1_603_076, plan.AnnualBudgets[0].Amount);
+        Assert.Equal(85, plan.LaborLines[0].WorkDaysTenths);
+        Assert.Equal(2028, plan.ConstructionWorks[2].PlannedFiscalYear);
+        Assert.Equal("123456", plan.ConstructionWorks[0].ManagementNumber);
+        Assert.Equal("123456789012345", plan.ConstructionWorks[1].ManagementNumber);
+        Assert.Equal("-5", plan.CostItems[0].WorkNumber);
+    }
+
+    /// <summary>
+    /// 16桁以上の数かは、15桁に丸めたあとの値で決める。保存された 999999999999999.9 は、丸める前は10の15乗より小さいが、
+    /// 15桁に丸めると 1E+15 になるので、16桁以上の数とする。
+    /// </summary>
+    [Fact]
+    public void Number_that_rounds_to_16_digits_is_reported()
+    {
+        Put("費用内訳", 2, "見積額", 0.444444444444444);
+        ReplaceStoredNumbers(new Dictionary<string, string> { ["0.444444444444444"] = "999999999999999.9" });
+
+        // 丸める前の値が、そのままブックに保存されていること(テストの前提)
+        Assert.Equal(999999999999999.9, Number("費用内訳", 2, "見積額"));
+        Assert.True(Number("費用内訳", 2, "見積額") < 1E+15);
+
+        Assert.Equal(["シート「費用内訳」 2行目 列「見積額」: 16桁以上の数は、文字のセルで入れてください。"], Errors());
+    }
+
+    /// <summary>
     /// 列に合わない日付のセルは、表示される文字で示す。日付の列は時刻のある日付、年月の列は1日でないか時刻のある日付を受け付けない。
     /// 日付と年月の列の文は、数値のセル(46113)と同じく決まり8の例の形(「は」の後に空白)にする。時刻は、2進数で割り切れる時刻にする。
     /// </summary>
     [Theory]
+    // D1(利用者に確認中)の答えが出るまで、日付・年月の列の3行は落ちたままにする
     [InlineData("工事", "開始日", "2027-02-10 12:00", "yyyy-mm-dd hh:mm", "「2027-02-10 12:00」は YYYY-MM-DD の日付ではありません。")]
     [InlineData("実績", "年月", "2027-02-15 00:00", "yyyy-mm-dd", "「2027-02-15」は YYYY-MM の年月ではありません。")]
     [InlineData("実績", "年月", "2027-02-01 06:00", "yyyy-mm-dd hh:mm", "「2027-02-01 06:00」は YYYY-MM の年月ではありません。")]
     // 文字の列の日付のセル(利用者が決めた文言)
     [InlineData("工事", "管理番号", "2027-03-01 00:00", "yyyy-mm-dd", "「2027-03-01」は文字か整数ではありません。")]
     [InlineData("予算年割", "予算額", "2027-03-01 00:00", "yyyy-mm-dd", "「2027-03-01」は桁区切りのない整数ではありません。")]
+    // 選択の列は、文字のセルだけを受け付ける
+    [InlineData("工事", "状態", "2027-03-01 00:00", "yyyy-mm-dd", "「2027-03-01」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。")]
     public void Date_cell_that_does_not_fit_the_column_is_reported(string sheet, string column, string dateTime, string format, string message)
     {
         Put(sheet, 2, column, DateTime.ParseExact(dateTime, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), format);
@@ -366,7 +483,7 @@ public sealed class WorkbookReaderTests : IDisposable
         Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: {message}", Assert.Single(Errors()));
     }
 
-    /// <summary>真偽のセルは、真偽の列でも受け付けない。表示される文字は、保存したセルの GetFormattedString で求める(TRUE・FALSE の書き方を決めつけない)。</summary>
+    /// <summary>真偽のセルは、真偽の列でも受け付けない。表示される文字は、Excel と同じ「TRUE」「FALSE」。</summary>
     [Fact]
     public void Boolean_cell_is_reported_with_its_displayed_text()
     {
@@ -378,10 +495,39 @@ public sealed class WorkbookReaderTests : IDisposable
 
         Assert.Equal(
             [
-                $"シート「工事」 2行目 列「削除済み」: 「{Shown("工事", 2, "削除済み")}」は「はい」か「いいえ」ではありません。",
-                $"シート「工事」 3行目 列「管理番号」: 「{Shown("工事", 3, "管理番号")}」は文字か整数ではありません。",
+                "シート「工事」 2行目 列「削除済み」: 「TRUE」は「はい」か「いいえ」ではありません。",
+                "シート「工事」 3行目 列「管理番号」: 「FALSE」は文字か整数ではありません。",
             ],
             Errors());
+    }
+
+    /// <summary>真偽のセルは、年度・日付の列でも受け付けない。</summary>
+    [Theory]
+    [InlineData("予算年割", "年度", true, "「TRUE」は西暦4桁の年度ではありません。")]
+    // 日付の列の真偽のセル。文は決まり8の例の形で、D1(利用者に確認中)の答えが出るまで落ちたままにする
+    [InlineData("工事", "開始日", true, "「TRUE」は YYYY-MM-DD の日付ではありません。")]
+    public void Boolean_cell_in_other_columns_is_reported(string sheet, string column, bool value, string message)
+    {
+        Put(sheet, 2, column, value);
+
+        Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: {message}", Assert.Single(Errors()));
+    }
+
+    /// <summary>エラーのセルは、年度・選択の列でも受け付けない。</summary>
+    [Theory]
+    [InlineData("予算年割", "年度", "#N/A", "「#N/A」は西暦4桁の年度ではありません。")]
+    [InlineData("工事", "状態", "#DIV/0!", "「#DIV/0!」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。")]
+    public void Error_cell_in_other_columns_is_reported(string sheet, string column, string error, string message)
+    {
+        XLError value = error switch
+        {
+            "#N/A" => XLError.NoValueAvailable,
+            "#DIV/0!" => XLError.DivisionByZero,
+            _ => throw new ArgumentOutOfRangeException(nameof(error), error, "知らないエラーです。"),
+        };
+        Put(sheet, 2, column, value);
+
+        Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: {message}", Assert.Single(Errors()));
     }
 
     [Fact]
@@ -419,6 +565,72 @@ public sealed class WorkbookReaderTests : IDisposable
         Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: 数式のセルは読みません。値で貼り付けてください。", Assert.Single(Errors()));
     }
 
+    /// <summary>
+    /// 数式のセルは、計算した値の有無によらず、値のあるセルに数える。数式のセルだけの行も読み、列名のある列を CSV と同じ列の順に読んで、
+    /// 数式のセルと、空欄の必須の列(工事の ID・管理番号・工事名・状態・削除済み)を示す。
+    /// ClosedXML は、数式を入れて保存したセルに計算した値を保存しないので、この行のセルは、値のない数式のセルになる(確かめ済み)。
+    /// </summary>
+    [Fact]
+    public void Row_with_only_a_formula_cell_is_read_and_reported()
+    {
+        Edit(workbook =>
+        {
+            // 3行目に行を入れ、備考にだけ数式を入れる。工事2〜4は4〜6行目になる
+            workbook.Worksheet("工事").Row(3).InsertRowsAbove(1);
+            Cell(workbook, "工事", 3, "備考").FormulaA1 = "\"メモ\"";
+        });
+
+        Assert.Equal(
+            [
+                "シート「工事」 3行目 列「ID」: 空欄にできません。",
+                "シート「工事」 3行目 列「管理番号」: 空欄にできません。",
+                "シート「工事」 3行目 列「工事名」: 空欄にできません。",
+                "シート「工事」 3行目 列「状態」: 空欄にできません。",
+                "シート「工事」 3行目 列「備考」: 数式のセルは読みません。値で貼り付けてください。",
+                "シート「工事」 3行目 列「削除済み」: 空欄にできません。",
+            ],
+            Errors());
+    }
+
+    /// <summary>
+    /// 1行目(列名の行)の数式のセルは、決まり7の誤りを1行目に示し、そのシートの行は読まない(2行目の形の違う値も示さない)。
+    /// ほかのシートは読み続ける。
+    /// </summary>
+    [Fact]
+    public void Formula_cell_in_header_row_is_reported_and_rows_of_the_sheet_are_not_read()
+    {
+        Edit(workbook =>
+        {
+            Set(workbook, "工事", 2, "状態", "施工ちゅう");
+            Set(workbook, "予算年割", 3, "年度", "20x7");
+            Cell(workbook, "工事", 1, "備考").FormulaA1 = "\"備考\"";
+        });
+
+        Assert.Equal(
+            [
+                "シート「工事」 1行目: 数式のセルは読みません。値で貼り付けてください。",
+                "シート「予算年割」 3行目 列「年度」: 「20x7」は西暦4桁の年度ではありません。",
+            ],
+            Errors());
+    }
+
+    /// <summary>列名の行のセルは、表示される文字で比べる(真偽の true は「TRUE」、標準の書式の 2027 は「2027」)。</summary>
+    [Theory]
+    [InlineData(true, "TRUE")]
+    [InlineData(2027d, "2027")]
+    public void Header_cells_are_compared_by_their_displayed_text(object header, string shown)
+    {
+        XLCellValue value = header switch
+        {
+            bool flag => flag,
+            double number => number,
+            _ => throw new ArgumentOutOfRangeException(nameof(header), header, "真偽か数を渡します。"),
+        };
+        Put("工事", 1, "備考", value);
+
+        Assert.Equal([$"シート「工事」 1行目: 足りない列: 備考。知らない列: {shown}"], Errors());
+    }
+
     /// <summary>列名のない列(1行目が空のセルの列)に値のある行は、行ごとに形の誤り(列なし)にする。</summary>
     [Fact]
     public void Value_in_a_column_without_name_is_reported()
@@ -451,6 +663,58 @@ public sealed class WorkbookReaderTests : IDisposable
 
         Assert.Empty(read.Errors);
         Assert.Equal(PlanCsvReader.ReadFolder(InputDirectory).ConstructionWorks, read.Plan!.ConstructionWorks);
+    }
+
+    /// <summary>空の文字のセル("")は空欄なので、列名のない列にあっても、値として数えない。</summary>
+    [Fact]
+    public void Column_without_name_and_only_empty_text_cells_is_ignored()
+    {
+        Edit(workbook =>
+        {
+            var works = workbook.Worksheet("工事");
+            works.Column(2).InsertColumnsBefore(1);
+            works.Cell(3, 2).Value = string.Empty;
+            works.Cell(5, 2).Value = string.Empty;
+        });
+
+        // 空の文字のセルが、保存したブックに文字のセルとして残っていること(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.True(IsEmptyText(saved.Worksheet("工事").Cell(3, 2)));
+        }
+
+        var read = PlanWorkbookReader.Read(workbookPath);
+
+        Assert.Empty(read.Errors);
+        Assert.Equal(PlanCsvReader.ReadFolder(InputDirectory).ConstructionWorks, read.Plan!.ConstructionWorks);
+    }
+
+    /// <summary>
+    /// 列名のない列にだけ値がある行も、列名のある列は今のとおり読む。その行の列名のない列の誤りを先に示し、
+    /// 続けて、列名のある列の誤り(空欄の必須の列:工事の ID・管理番号・工事名・状態・削除済み)を CSV と同じ列の順に示す。
+    /// 列名のない列(B列)は ID の列(A列)より右にあるが、列名のない列の誤りが先になる。
+    /// </summary>
+    [Fact]
+    public void Row_with_a_value_only_in_a_column_without_name_is_read_and_reported()
+    {
+        Edit(workbook =>
+        {
+            // B列に列名のない列を入れ、工事4(5行目)の次の6行目には、その列にだけ値を入れる
+            var works = workbook.Worksheet("工事");
+            works.Column(2).InsertColumnsBefore(1);
+            works.Cell(6, 2).Value = "メモ";
+        });
+
+        Assert.Equal(
+            [
+                "シート「工事」 6行目: 列名のない列に値があります。",
+                "シート「工事」 6行目 列「ID」: 空欄にできません。",
+                "シート「工事」 6行目 列「管理番号」: 空欄にできません。",
+                "シート「工事」 6行目 列「工事名」: 空欄にできません。",
+                "シート「工事」 6行目 列「状態」: 空欄にできません。",
+                "シート「工事」 6行目 列「削除済み」: 空欄にできません。",
+            ],
+            Errors());
     }
 
     /// <summary>1行目に値のあるセルが1つもないシートは、CSV と同じ文で列名の行がないと示す。2行目からの行があってもなくても同じ。</summary>
@@ -502,26 +766,75 @@ public sealed class WorkbookReaderTests : IDisposable
         Assert.Equal(read.Errors[0].Message, Assert.ThrowsAny<Exception>(() => PlanWorkbookReader.ReadWorkbook(workbookPath)).Message);
     }
 
-    /// <summary>ブックとして開けないファイルは、ファイル名を場所とする形の誤り1件にする(利用者が決めた文言)。</summary>
-    [Fact]
-    public void File_that_is_not_a_workbook_is_reported_with_its_name()
+    /// <summary>
+    /// ブックとして開けないファイル(文字・空・ブックでない zip・パスワード付きの形・途中で切れたもの)は、
+    /// 例外の種類によらず、ファイル名を場所とする形の誤り1件にする(利用者が決めた文言)。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(UnreadableWorkbooks.Kinds), MemberType = typeof(UnreadableWorkbooks))]
+    public void File_that_is_not_a_workbook_is_reported_with_its_name(string kind)
     {
-        File.WriteAllText(workbookPath, "ID,管理番号\n1,例1\n");
+        UnreadableWorkbooks.Write(kind, workbookPath);
 
         var read = PlanWorkbookReader.Read(workbookPath);
 
         Assert.Null(read.Plan);
+        Assert.Null(read.Source);
         Assert.Equal("入力.xlsx: ブックとして読めません。", Assert.Single(read.Errors).Message);
         Assert.Equal("入力.xlsx: ブックとして読めません。", Assert.ThrowsAny<Exception>(() => PlanWorkbookReader.ReadWorkbook(workbookPath)).Message);
     }
 
-    /// <summary>Excel で開いたままのブックも読める(ほかの書き込みを許す共有で開く)。</summary>
+    /// <summary>
+    /// Excel で開いたままのブックも読める(ほかの書き込みを許す共有で開く)。Windows でだけ動かす。
+    /// ほかの OS では、.NET はほかのハンドルの共有の指定をほとんど確かめず(FileShare.None のときだけ排他のロックを取る)、
+    /// 書き込みを許さない共有で開く実装でも読めてしまうので、確かめにならない(Linux で確かめ済み)。
+    /// </summary>
     [Fact]
     public void Workbook_opened_for_writing_elsewhere_can_be_read()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows でだけ確かめられる。ほかの OS では、書き込みを許さない共有で開いても読めてしまう。");
+
         using var opened = new FileStream(workbookPath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
 
         Assert.Empty(PlanWorkbookReader.Read(workbookPath).Errors);
+    }
+
+    /// <summary>
+    /// 表示される文字は、マシンの文化(カルチャ)によらず日本語(ja-JP)で作る。小数点が「,」の de-DE や en-US で動かしても、
+    /// 文の値は ja-JP の書き方(小数点は「.」、桁区切りは「,」)になる。
+    /// </summary>
+    [Theory]
+    [InlineData("de-DE")]
+    [InlineData("en-US")]
+    public void Displayed_text_does_not_depend_on_the_current_culture(string cultureName)
+    {
+        Edit(workbook =>
+        {
+            Set(workbook, "作業明細", 2, "作業日数", 10.25);
+            Set(workbook, "予算年割", 2, "予算額", 1234.5, "#,##0.0");
+        });
+
+        var culture = CultureInfo.CurrentCulture;
+        var uiCulture = CultureInfo.CurrentUICulture;
+        List<string> errors;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(cultureName);
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo(cultureName);
+            errors = Errors();
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = culture;
+            CultureInfo.CurrentUICulture = uiCulture;
+        }
+
+        Assert.Equal(
+            [
+                "シート「予算年割」 2行目 列「予算額」: 「1,234.5」は桁区切りのない整数ではありません。",
+                "シート「作業明細」 2行目 列「作業日数」: 「10.25」は0以上の、小数点以下1桁までの数ではありません。",
+            ],
+            errors);
     }
 
     private List<string> Errors() => [.. PlanWorkbookReader.Read(workbookPath).Errors.Select(error => error.Message)];
@@ -579,12 +892,8 @@ public sealed class WorkbookReaderTests : IDisposable
     private void Put(string sheet, int row, string column, XLCellValue value, string? format = null) =>
         Edit(workbook => Set(workbook, sheet, row, column, value, format));
 
-    /// <summary>保存したブックのセルの、表示される文字(ClosedXML の GetFormattedString)。</summary>
-    private string Shown(string sheet, int row, string column)
-    {
-        using var workbook = new XLWorkbook(workbookPath);
-        return Cell(workbook, sheet, row, column).GetFormattedString();
-    }
+    /// <summary>セルが、空の文字("")の文字のセルか。</summary>
+    private static bool IsEmptyText(IXLCell cell) => cell.Value.IsText && cell.Value.GetText().Length == 0;
 
     /// <summary>保存したブックのセルの、数値の値。</summary>
     private double Number(string sheet, int row, string column)
