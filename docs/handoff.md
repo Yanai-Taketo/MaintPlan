@@ -24,7 +24,7 @@
 - 段ごとに、main から作業ブランチを切ってプッシュし、PR を作る。利用者が確認してマージする。
 - 段7は、段のまとめのブランチ kotei1-dan7 を main から切り、その下に sub のブランチ(kotei1-dan7-sub1〜sub3)を切る。sub ごとに kotei1-dan7 へのドラフト PR を作り、利用者が確認してマージする。次の sub は、マージ後の kotei1-dan7 から切る。sub3 まで入ったら、kotei1-dan7 から main への PR で段7の完了を報告する。
 - sub2 は、利用者の指示で、PR #9 のマージを待たずに kotei1-dan7-sub1 の上に積んだ。PR #10 は向き先が kotei1-dan7-sub1 のままマージされたので、kotei1-dan7 には kotei1-dan7-handoff の PR(PR #11)で入れた。sub を積むときは、下の PR のマージ後に、上の PR の向き先を kotei1-dan7 に替えてからマージする。
-- 段7の残りは、kotei1-dan7-rules(決まりの反映)、kotei1-dan7-ex16(例16)、kotei1-dan7-sub3(Excel の読み書き)の順に、それぞれ kotei1-dan7 へのドラフト PR にする。次のブランチは、前の PR のマージ後の kotei1-dan7 から切る。
+- 段7は、kotei1-dan7-rules(決まりの反映、PR #12 でマージ済み)、kotei1-dan7-ex16(例16、PR #13 でマージ済み)、kotei1-dan7-sub3(Excel の読み書き)の順に、それぞれ kotei1-dan7 へのドラフト PR にする。次のブランチは、前の PR のマージ後の kotei1-dan7 から切る。
 - 利用者は、確認用コンソールを手元の Windows(.NET 10 SDK)で動かす。実際に近いデータは、リポジトリに置かない。
 - コードの名前(クラス名・プロパティ名など)は英語。テストデータのファイル名とフォルダ名は日本語。
 - テストデータの形は tests/data/README.md に従う。テストデータを足すときは、設計書の値をそのまま写し、写し手を分けて突き合わせる。
