@@ -28,7 +28,7 @@ public sealed record ConsoleArguments(
 
     private static readonly string[] Options = [Input, Output, AmountKindOption, StatusesOption, CategoriesOption, BaseDateOption];
     private static readonly string[] HelpOptions = ["--help", "-h"];
-    private static readonly char[] ListSeparators = ['、', ','];
+    private static readonly char[] ListSeparators = ['、', ',', '\uFF0C'];
 
     public static string Usage { get; } = string.Join(
         Environment.NewLine,
@@ -39,9 +39,9 @@ public sealed record ConsoleArguments(
         "",
         "集計の条件(省いたときの値)",
         "  --amount-kind  山積みの金額の種類。予算額・見積額・実績額のどれか1つ(3つとも)",
-        "  --statuses     山積み・人工の内訳・未入力の件数に含める状態。「、」か「,」で区切る(すべて)",
-        "  --categories   山積み・人工の内訳・未入力の件数に含める費用区分。「、」か「,」で区切る(修繕費と設備投資の両方)",
-        "  --base-date    残予算と見込み残の集計基準日。YYYY-MM-DD(当日)",
+        "  --statuses     山積み・人工の内訳・未入力の件数に含める状態。「、」「,」「\uFF0C」のどれかで区切る(すべて)",
+        "  --categories   山積み・人工の内訳・未入力の件数に含める費用区分。「、」「,」「\uFF0C」のどれかで区切る(修繕費と設備投資の両方)",
+        "  --base-date    残予算と見込み残の集計基準日。YYYY-MM-DD(日本時間の当日)",
         "",
         "  --help, -h     この使い方を出す",
         "");

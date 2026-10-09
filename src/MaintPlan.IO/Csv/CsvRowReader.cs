@@ -12,7 +12,7 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row, ICol
     public int Int(string column) => Required(column, OptionalInt);
 
     public int? OptionalInt(string column) =>
-        Parse<int>(column, text => int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null, "整数");
+        Parse<int>(column, text => int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var value) ? value : null, "0以上の整数");
 
     /// <summary>金額。円の整数で、桁区切りは付けない。</summary>
     public long Amount(string column) => Required(column, OptionalAmount);
@@ -22,7 +22,7 @@ internal sealed partial class CsvRowReader(CsvTable table, CsvTableRow row, ICol
 
     /// <summary>小数点以下1桁までの数を、10倍した整数で返す。</summary>
     public long Tenths(string column) =>
-        Required(column, name => Parse<long>(name, ParseTenths, "小数点以下1桁までの数"));
+        Required(column, name => Parse<long>(name, ParseTenths, "0以上の、小数点以下1桁までの数"));
 
     /// <summary>年度。西暦4桁。</summary>
     public int FiscalYear(string column) => Required(column, OptionalFiscalYear);

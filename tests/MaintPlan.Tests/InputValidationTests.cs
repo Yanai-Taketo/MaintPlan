@@ -164,6 +164,16 @@ public sealed class InputValidationTests : IDisposable
         Assert.Empty(Describe());
     }
 
+    [Fact]
+    public void Duplicate_unit_rates_of_a_deleted_staff_category_are_shown()
+    {
+        // 単価は計算で使うので、人員区分1が削除済みでも確かめる。
+        ReplaceCell("人員区分", 2, PlanCsvReader.Deleted, "はい");
+        AppendLine("単価", "5,1,2027,1,いいえ");
+
+        Assert.Equal(["単価.csv 6行目 列「人員区分ID」「年度」: 人員区分ID 1 と年度 2027 の組み合わせが重複しています。最初の行は3行目です。"], Describe());
+    }
+
     [Theory]
     [InlineData("工事", 2, "終了日", "", "工事.csv 2行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。")]
     [InlineData("作業明細", 3, "開始日", "", "作業明細.csv 3行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。")]
@@ -221,6 +231,148 @@ public sealed class InputValidationTests : IDisposable
     }
 
     [Fact]
+    public void Rows_under_deleted_work_and_cost_item_are_not_checked()
+    {
+        AddRowsUnderWorkAndCostItem(deleted: "はい");
+
+        Assert.Empty(Describe());
+    }
+
+    [Fact]
+    public void Rows_under_work_and_cost_item_that_are_not_deleted_are_checked()
+    {
+        AddRowsUnderWorkAndCostItem(deleted: "いいえ");
+
+        Assert.Equal(
+        [
+            "費用内訳.csv 6行目 列「工事番号」: 工事番号「W-1」が重複しています。最初の行は2行目です。",
+            "費用内訳.csv 7行目 列「工事ID」「費用区分」: 工事ID 5 と費用区分「修繕費」の組み合わせが重複しています。最初の行は6行目です。",
+            "予算年割.csv 8行目 列「費用内訳ID」「年度」: 費用内訳ID 5 と年度 2027 の組み合わせが重複しています。最初の行は7行目です。",
+            "予算年割.csv 10行目 列「費用内訳ID」「年度」: 費用内訳ID 7 と年度 2027 の組み合わせが重複しています。最初の行は9行目です。",
+            "月別修正.csv 4行目 列「費用内訳ID」「金額の種類」「年月」: 費用内訳ID 5・金額の種類「予算額」・年月 2027-05 の組み合わせが重複しています。最初の行は3行目です。",
+            "月別修正.csv 6行目 列「費用内訳ID」「金額の種類」「年月」: 費用内訳ID 7・金額の種類「見積額」・年月 2027-05 の組み合わせが重複しています。最初の行は5行目です。",
+            "作業明細.csv 7行目 列「開始日」「終了日」: 開始日と終了日は、両方入れるか両方空欄にします。",
+            "作業明細.csv 8行目 列「開始日」「終了日」: 終了日 2027-05-01 が開始日 2027-05-31 より前です。",
+        ], Describe());
+    }
+
+    [Fact]
+    public void Id_duplicates_and_missing_references_under_deleted_parents_are_shown()
+    {
+        // 工事4と費用内訳3を削除済みにする。それぞれの下に、ID の重なる行(費用内訳4の年割、費用内訳3の作業明細)を足し、
+        // 作業明細(費用内訳3の作業明細4、費用内訳4の作業明細5)の人員区分を、ない ID にする。
+        ReplaceCell("工事", 5, PlanCsvReader.Deleted, "はい");
+        ReplaceCell("費用内訳", 4, PlanCsvReader.Deleted, "はい");
+        AppendLine("予算年割", "1,4,2027,1,いいえ");
+        AppendLine("作業明細", "1,3,1,,,,1,1.0,いいえ");
+        ReplaceCell("作業明細", 5, "人員区分ID", "9");
+        ReplaceCell("作業明細", 6, "人員区分ID", "9");
+
+        Assert.Equal(
+        [
+            "予算年割.csv 7行目 列「ID」: ID 1 が重複しています。最初の行は2行目です。",
+            "作業明細.csv 5行目 列「人員区分ID」: 人員区分ID 9 に当たる人員区分の行がありません。",
+            "作業明細.csv 6行目 列「人員区分ID」: 人員区分ID 9 に当たる人員区分の行がありません。",
+            "作業明細.csv 7行目 列「ID」: ID 1 が重複しています。最初の行は2行目です。",
+        ], Describe());
+    }
+
+    [Theory]
+    // 先の行を削除済みにする
+    [InlineData("はい", "いいえ")]
+    // 後の行を削除済みにする
+    [InlineData("いいえ", "はい")]
+    public void Parent_with_a_row_that_is_not_deleted_is_not_treated_as_deleted(string firstDeleted, string laterDeleted)
+    {
+        // 工事4と費用内訳1に同じ ID の行を足し、どちらか一方だけを削除済みにする。工事4の下に費用区分が同じ費用内訳、費用内訳1の下に年度が同じ年割を足す。
+        ReplaceCell("工事", 5, PlanCsvReader.Deleted, firstDeleted);
+        AppendLine("工事", $"4,例5,配管補修,承認済み,2026-11-01,2026-12-15,,,,,,,,,{laterDeleted}");
+        ReplaceCell("費用内訳", 2, PlanCsvReader.Deleted, firstDeleted);
+        AppendLine("費用内訳", $"1,1,修繕費,出来高,,3000000,500000,,{laterDeleted}");
+        AppendLine("費用内訳", "5,4,修繕費,出来高,,,,,いいえ");
+        AppendLine("予算年割", "6,1,2026,1,いいえ");
+
+        Assert.Equal(
+        [
+            "工事.csv 6行目 列「ID」: ID 4 が重複しています。最初の行は5行目です。",
+            "費用内訳.csv 6行目 列「ID」: ID 1 が重複しています。最初の行は2行目です。",
+            "費用内訳.csv 7行目 列「工事ID」「費用区分」: 工事ID 4 と費用区分「修繕費」の組み合わせが重複しています。最初の行は5行目です。",
+            "予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 1 と年度 2026 の組み合わせが重複しています。最初の行は2行目です。",
+        ], Describe());
+    }
+
+    [Fact]
+    public void Cost_item_whose_rows_are_all_treated_as_deleted_is_a_deleted_parent()
+    {
+        // 工事4を削除済みにし、費用内訳4の行を、工事1の削除済みの行として足す。費用内訳4の行はどちらも削除済みとして扱うので、その下の年割の重複は確かめない。
+        ReplaceCell("工事", 5, PlanCsvReader.Deleted, "はい");
+        AppendLine("費用内訳", "4,1,設備投資,出来高,,,,,はい");
+        AppendLine("予算年割", "6,4,2026,1,いいえ");
+
+        Assert.Equal(["費用内訳.csv 6行目 列「ID」: ID 4 が重複しています。最初の行は5行目です。"], Describe());
+    }
+
+    [Fact]
+    public void Cost_item_with_a_row_under_a_work_that_is_not_deleted_is_not_treated_as_deleted()
+    {
+        // 工事4を削除済みにし、費用内訳4の行を、工事1の削除済みでない行として足す。費用内訳4は削除済みとして扱わないので、その下の年割の重複を確かめる。
+        ReplaceCell("工事", 5, PlanCsvReader.Deleted, "はい");
+        AppendLine("費用内訳", "4,1,設備投資,出来高,,,,,いいえ");
+        AppendLine("予算年割", "6,4,2026,1,いいえ");
+
+        Assert.Equal(
+        [
+            "費用内訳.csv 6行目 列「ID」: ID 4 が重複しています。最初の行は5行目です。",
+            "予算年割.csv 7行目 列「費用内訳ID」「年度」: 費用内訳ID 4 と年度 2026 の組み合わせが重複しています。最初の行は6行目です。",
+        ], Describe());
+    }
+
+    [Fact]
+    public void Row_under_a_deleted_work_is_not_the_first_row_of_a_work_number()
+    {
+        // 工事4を削除済みにし、その費用内訳4に工事番号 W-1 を入れる。後に、工事2の費用内訳として同じ工事番号の行を足す。
+        ReplaceCell("工事", 5, PlanCsvReader.Deleted, "はい");
+        ReplaceCell("費用内訳", 5, "工事番号", "W-1");
+        AppendLine("費用内訳", "5,2,修繕費,出来高,W-1,,,,いいえ");
+
+        Assert.Empty(Describe());
+    }
+
+    [Fact]
+    public void Rows_under_a_missing_work_are_checked()
+    {
+        // 工事9の行はない。工事9の費用内訳5と同じ工事番号の費用内訳を後に足し、費用内訳5の下に年度が同じ年割を2件足す。
+        AppendLine("費用内訳", "5,9,修繕費,出来高,W-1,,,,いいえ");
+        AppendLine("費用内訳", "6,2,修繕費,出来高,W-1,,,,いいえ");
+        AppendLine("予算年割", "6,5,2027,1,いいえ");
+        AppendLine("予算年割", "7,5,2027,1,いいえ");
+
+        Assert.Equal(
+        [
+            "費用内訳.csv 6行目 列「工事ID」: 工事ID 9 に当たる工事の行がありません。",
+            "費用内訳.csv 7行目 列「工事番号」: 工事番号「W-1」が重複しています。最初の行は6行目です。",
+            "予算年割.csv 8行目 列「費用内訳ID」「年度」: 費用内訳ID 5 と年度 2027 の組み合わせが重複しています。最初の行は7行目です。",
+        ], Describe());
+    }
+
+    [Fact]
+    public void Rows_under_a_missing_cost_item_are_checked()
+    {
+        // 費用内訳9の行はない。費用内訳9の月別修正を2件、同じ組み合わせにする。
+        // 後の行には、組み合わせの重複と参照先の違反が出る。同じ行の中の違反の順は決まっていないので、順を比べない。
+        ReplaceCell("月別修正", 2, "費用内訳ID", "9");
+        AppendLine("月別修正", "2,9,見積額,2027-03,100,いいえ");
+        string[] expected =
+        [
+            "月別修正.csv 2行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。",
+            "月別修正.csv 3行目 列「費用内訳ID」「金額の種類」「年月」: 費用内訳ID 9・金額の種類「見積額」・年月 2027-03 の組み合わせが重複しています。最初の行は2行目です。",
+            "月別修正.csv 3行目 列「費用内訳ID」: 費用内訳ID 9 に当たる費用内訳の行がありません。",
+        ];
+
+        Assert.Equal(expected.Order(StringComparer.Ordinal), Describe().Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
     public void Override_of_actual_amount_is_shown()
     {
         var plan = PlanCsvReader.ReadFolder(directory);
@@ -230,6 +382,23 @@ public sealed class InputValidationTests : IDisposable
 
         Assert.Equal((InputViolationKind.InvalidOverrideKind, PlanTable.MonthlyOverride, 0), (violation.Kind, violation.Table, violation.RowIndex));
         Assert.Equal(["金額の種類"], violation.Columns);
+    }
+
+    [Theory]
+    [InlineData(PlanTable.ConstructionWork)]
+    [InlineData(PlanTable.CostItem)]
+    public void Override_of_actual_amount_under_a_deleted_parent_is_not_shown(PlanTable deletedParent)
+    {
+        // 月別修正1は、工事1の費用内訳1の修正。工事1か費用内訳1を削除済みにする。
+        var plan = PlanCsvReader.ReadFolder(directory);
+        plan = plan with
+        {
+            ConstructionWorks = [plan.ConstructionWorks[0] with { IsDeleted = deletedParent == PlanTable.ConstructionWork }, .. plan.ConstructionWorks.Skip(1)],
+            CostItems = [plan.CostItems[0] with { IsDeleted = deletedParent == PlanTable.CostItem }, .. plan.CostItems.Skip(1)],
+            MonthlyOverrides = [plan.MonthlyOverrides[0] with { Kind = AmountKind.Actual }],
+        };
+
+        Assert.Empty(InputValidation.Validate(plan).Violations);
     }
 
     [Fact]
@@ -352,6 +521,31 @@ public sealed class InputValidationTests : IDisposable
         var read = PlanCsvReader.Read(directory);
         Assert.Empty(read.Errors);
         return [.. InputValidation.Validate(read.Plan!).Violations.Select(violation => InputViolationText.Describe(violation, read.Source!))];
+    }
+
+    /// <summary>
+    /// 工事5と、工事3の費用内訳7を、削除済みの印を deleted にして足す。その下に、削除済みの印がなく、親が削除済みでなければ決まりに合わない行を足す。
+    /// 工事5の下は、費用内訳1と同じ工事番号の費用内訳5と、費用内訳5と費用区分が同じ費用内訳6。費用内訳5と7の下は、年度が同じ年割、
+    /// 組み合わせが同じ月別修正と、日付の誤った作業明細(費用内訳5は開始日だけ、費用内訳7は終了日が開始日より前)。
+    /// 親が削除済みでないときも、保存できない条件には当たらない(日付の誤った行と重複した年割・月別修正は、保存できない条件の確認から除くため)。
+    /// </summary>
+    private void AddRowsUnderWorkAndCostItem(string deleted)
+    {
+        ReplaceCell("費用内訳", 2, "工事番号", "W-1");
+        AppendLine("工事", $"5,例5,配管更新,計画中,2027-04-01,2027-09-30,,,,,,,,,{deleted}");
+        AppendLine("費用内訳", "5,5,修繕費,出来高,W-1,,,,いいえ");
+        AppendLine("費用内訳", "6,5,修繕費,出来高,,,,,いいえ");
+        AppendLine("費用内訳", $"7,3,設備投資,出来高,,,,,{deleted}");
+        AppendLine("予算年割", "6,5,2027,100,いいえ");
+        AppendLine("予算年割", "7,5,2027,100,いいえ");
+        AppendLine("予算年割", "8,7,2027,100,いいえ");
+        AppendLine("予算年割", "9,7,2027,100,いいえ");
+        AppendLine("月別修正", "2,5,予算額,2027-05,100,いいえ");
+        AppendLine("月別修正", "3,5,予算額,2027-05,100,いいえ");
+        AppendLine("月別修正", "4,7,見積額,2027-05,100,いいえ");
+        AppendLine("月別修正", "5,7,見積額,2027-05,100,いいえ");
+        AppendLine("作業明細", "6,5,1,,2027-05-01,,1,1.0,いいえ");
+        AppendLine("作業明細", "7,7,1,,2027-05-31,2027-05-01,1,1.0,いいえ");
     }
 
     /// <summary>写した入力を、caseId のケースの入力に入れ替える。</summary>

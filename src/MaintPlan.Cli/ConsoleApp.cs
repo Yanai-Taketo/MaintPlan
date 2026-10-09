@@ -19,7 +19,7 @@ public static class ConsoleApp
     public const int Failed = 1;
     public const int UsageError = 2;
 
-    /// <summary>today は、集計基準日を省いたときに使う当日の日付。</summary>
+    /// <summary>today は、集計基準日を省いたときに使う、日本時間の当日の日付。</summary>
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, DateOnly today)
     {
         ConsoleArguments arguments;
@@ -172,7 +172,7 @@ public static class ConsoleApp
         output.WriteLine($"  金額の種類: {LabelList(condition.AmountKind is { } kind ? [kind] : Enum.GetValues<AmountKind>())}");
         output.WriteLine($"  含める状態: {LabelList(condition.Statuses)}");
         output.WriteLine($"  費用区分: {LabelList(condition.Categories)}");
-        output.WriteLine($"  集計基準日: {condition.BaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}{(arguments.BaseDate is null ? "(当日)" : string.Empty)}");
+        output.WriteLine($"  集計基準日: {condition.BaseDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}{(arguments.BaseDate is null ? "(日本時間の当日)" : string.Empty)}");
     }
 
     /// <summary>未入力の件数を「予算額 1件(例12D)」の形で、金額の種類ごとに1行ずつ書く。予算額・見積額を集計しないときは書かない。</summary>

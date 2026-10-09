@@ -118,6 +118,27 @@ public sealed class CsvReaderTests : IDisposable
             Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
     }
 
+    /// <summary>
+    /// 整数の列(ID・参照の ID・人数・表示順)と作業日数は0以上だけを受け付け、負の値は0以上の数でないと示す。
+    /// 負でない形の誤り(整数の列の小数、作業日数の小数点以下2桁)も、同じ文で示す。
+    /// </summary>
+    [Theory]
+    [InlineData("作業明細", "人数", "1.5", "作業明細.csv 2行目 列「人数」: 「1.5」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "作業日数", "10.25", "作業明細.csv 2行目 列「作業日数」: 「10.25」は0以上の、小数点以下1桁までの数ではありません。")]
+    [InlineData("工事", "ID", "-2", "工事.csv 2行目 列「ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("費用内訳", "工事ID", "-2", "費用内訳.csv 2行目 列「工事ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("実績", "費用内訳ID", "-2", "実績.csv 2行目 列「費用内訳ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("単価", "人員区分ID", "-2", "単価.csv 2行目 列「人員区分ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "人数", "-2", "作業明細.csv 2行目 列「人数」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("人員区分", "表示順", "-2", "人員区分.csv 2行目 列「表示順」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "作業日数", "-1.5", "作業明細.csv 2行目 列「作業日数」: 「-1.5」は0以上の、小数点以下1桁までの数ではありません。")]
+    public void Integer_and_work_day_errors_say_zero_or_more(string table, string column, string value, string message)
+    {
+        ReplaceFirstRowCell(table, column, value);
+
+        Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
     [Fact]
     public void File_problems_of_all_tables_are_collected()
     {
