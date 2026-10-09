@@ -2,13 +2,14 @@ using System.Globalization;
 using System.Text;
 using CsvHelper;
 using CsvHelper.Configuration;
+using MaintPlan.IO.Input;
 
 namespace MaintPlan.IO.Csv;
 
 /// <summary>列名と、文字列のままの値を持つ表。</summary>
 public sealed record CsvTable(string FilePath, IReadOnlyList<string> Columns, IReadOnlyList<CsvTableRow> Rows)
 {
-    /// <summary>CSV ファイルを読む。文字コードは UTF-8(BOM の有無は問わない)。1行目を列名とする。</summary>
+    /// <summary>CSV ファイルを読む。文字コードは UTF-8(BOM の有無は問わない)。1行目を列名とし、列名が重複していれば、行を読まずに CsvFormatException を投げる。</summary>
     public static CsvTable Read(string filePath)
     {
         var configuration = new CsvConfiguration(CultureInfo.InvariantCulture)
@@ -26,10 +27,9 @@ public sealed record CsvTable(string FilePath, IReadOnlyList<string> Columns, IR
             throw new CsvFormatException(filePath, null, null, "列名の行がありません。");
         }
 
-        var duplicated = header.GroupBy(name => name).Where(group => group.Count() > 1).Select(group => group.Key).ToList();
-        if (duplicated.Count > 0)
+        if (PlanTableReader.DuplicateColumnsProblem(header) is { } duplicated)
         {
-            throw new CsvFormatException(filePath, 1, null, $"列名が重複しています: {string.Join("、", duplicated)}");
+            throw new CsvFormatException(filePath, 1, null, duplicated);
         }
 
         var rows = new List<CsvTableRow>();

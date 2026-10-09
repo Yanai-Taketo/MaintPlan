@@ -5,6 +5,7 @@ namespace MaintPlan.IO.Input;
 /// <summary>
 /// 計算に使う9つのテーブルを、テーブルごとの表(CSV のファイルか、ブックのシート)から読む。CSV とブックで同じ読み方をする。
 /// 列名は設計書3章の項目名と「削除済み」とし、重複や過不足があれば、そのテーブルの行は読まない。
+/// 列名の重複は、表を読むところ(CSV は CsvTable.Read、ブックは PlanWorkbookReader)が、行を読む前に DuplicateColumnsProblem で確かめる。
 /// </summary>
 internal static class PlanTableReader
 {
@@ -25,9 +26,16 @@ internal static class PlanTableReader
             ["予算枠"] = ["ID", "年度", "費用区分", "予算枠額", Deleted],
         };
 
+    /// <summary>列名の重複の文。重複がなければ null。</summary>
+    public static string? DuplicateColumnsProblem(IEnumerable<string> columns)
+    {
+        var duplicated = columns.GroupBy(name => name).Where(group => group.Count() > 1).Select(group => group.Key).ToList();
+        return duplicated.Count > 0 ? $"列名が重複しています: {string.Join("、", duplicated)}" : null;
+    }
+
     /// <summary>
-    /// テーブルごとに readTable で表を読み、9つのテーブルにする。readTable は、表として読めないとき(ファイルやシートがない、列名の行がないなど)は
-    /// InputFormatException を投げる。形の違う値は、最初の1件で止めずにすべて集める。
+    /// テーブルごとに readTable で表を読み、9つのテーブルにする。readTable は、表として読めないとき(ファイルやシートがない、列名の行がない、
+    /// 列名が重複するなど)は InputFormatException を投げる。形の違う値は、最初の1件で止めずにすべて集める。
     /// 形の違う値がなければ、読んだ内容と、行の場所を返す。
     /// </summary>
     public static PlanReadResult Read(Func<PlanTable, InputTable> readTable)
@@ -173,15 +181,9 @@ internal static class PlanTableReader
             return items;
         }
 
-        /// <summary>列名の重複と過不足の文。誤りがなければ null。</summary>
+        /// <summary>列名の過不足の文。誤りがなければ null。</summary>
         private static string? ColumnProblem(InputTable input, IReadOnlyList<string> expected)
         {
-            var duplicated = input.Columns.GroupBy(name => name).Where(group => group.Count() > 1).Select(group => group.Key).ToList();
-            if (duplicated.Count > 0)
-            {
-                return $"列名が重複しています: {string.Join("、", duplicated)}";
-            }
-
             var missing = expected.Except(input.Columns).ToList();
             var unknown = input.Columns.Except(expected).ToList();
             var problems = new List<string>();

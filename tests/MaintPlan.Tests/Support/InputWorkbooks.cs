@@ -99,7 +99,7 @@ public static class InputWorkbooks
             var worksheet = workbook.Worksheets.Add(sheet.Table);
             for (var column = 0; column < table.Columns.Count; column++)
             {
-                worksheet.Cell(1, column + 1).Value = table.Columns[column];
+                worksheet.Cell(1, column + 1).Value = TextValue(table.Columns[column]);
             }
 
             for (var row = 0; row < table.Rows.Count; row++)
@@ -179,10 +179,16 @@ public static class InputWorkbooks
                 cell.Style.NumberFormat.Format = YearMonthFormat;
                 break;
             default:
-                cell.Value = text;
+                cell.Value = TextValue(text);
                 break;
         }
     }
+
+    /// <summary>
+    /// 文字のセルに入れる値。ClosedXML 0.105.1 は、セルに入れた文字の先頭の「'」を1つ除いて、セルの印(quotePrefix)にする。
+    /// 先頭が「'」の文字は「'」を1つ足して入れ、セルの文字を CSV の値と同じにする。
+    /// </summary>
+    private static string TextValue(string text) => text.StartsWith('\'') ? "'" + text : text;
 
     private static InputColumn Number(string name) => new(name, InputCellKind.Number);
 

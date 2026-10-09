@@ -24,7 +24,7 @@ public static partial class ResultWorkbookWriter
 
     /// <summary>
     /// ブックを作り直して path に書く。同じ名前のファイルは上書きし(ブックにあったほかのシートは残らない)、親のフォルダがなければ作る。
-    /// 空の値のセルには、何も入れない。
+    /// 空の値のセルには、何も入れない。文字のセルの文字は、表の値と同じにする(先頭の「'」も残す)。
     /// </summary>
     public static void Write(string path, IReadOnlyList<NamedTable> tables)
     {
@@ -35,7 +35,7 @@ public static partial class ResultWorkbookWriter
             var numericColumns = NumericColumns.GetValueOrDefault(name, []);
             for (var column = 0; column < table.Columns.Count; column++)
             {
-                sheet.Cell(1, column + 1).Value = table.Columns[column];
+                sheet.Cell(1, column + 1).Value = TextValue(table.Columns[column]);
             }
 
             for (var row = 0; row < table.Rows.Count; row++)
@@ -45,7 +45,7 @@ public static partial class ResultWorkbookWriter
                     var text = table.Rows[row][column];
                     if (text.Length > 0)
                     {
-                        sheet.Cell(row + 2, column + 1).Value = numericColumns.Contains(table.Columns[column]) && NumberOf(text) is { } number ? number : text;
+                        sheet.Cell(row + 2, column + 1).Value = numericColumns.Contains(table.Columns[column]) && NumberOf(text) is { } number ? number : TextValue(text);
                     }
                 }
             }
@@ -64,6 +64,12 @@ public static partial class ResultWorkbookWriter
         NumberPattern().IsMatch(text) && text.Where(char.IsAsciiDigit).SkipWhile(digit => digit == '0').Count() <= 15
             ? decimal.Parse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture)
             : null;
+
+    /// <summary>
+    /// 文字のセルに入れる値。ClosedXML 0.105.1 は、セルに入れた文字の先頭の「'」を1つ除いて、セルの印(quotePrefix)にする。
+    /// 先頭が「'」の文字は「'」を1つ足して入れ、セルの文字を元の文字と同じにする。
+    /// </summary>
+    private static string TextValue(string text) => text.StartsWith('\'') ? "'" + text : text;
 
     [GeneratedRegex(@"^-?[0-9]+(\.[0-9]+)?\z")]
     private static partial Regex NumberPattern();

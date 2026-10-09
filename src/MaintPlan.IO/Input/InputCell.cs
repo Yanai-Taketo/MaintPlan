@@ -41,18 +41,48 @@ internal enum AcceptedCells
 }
 
 /// <summary>
-/// 表のセル。Shown は、文字のセルではその文字、ほかのセルでは Excel で表示される文字で、形の誤りの文に使う(数式のセルは空)。
-/// Number は数値のセルの値を有効数字15桁に丸めたもの、Date は日付のセルの値で、ほかの型のセルでは使わない。
+/// 表のセル。Number は数値のセルの値を有効数字15桁に丸めたもの、Date は日付のセルの値で、ほかの型のセルでは使わない。
+/// 文字でないセルの表示される文字は、形の誤りの文を作るときにだけ作る。受け付けた値は、表示される文字によらない。
 /// </summary>
-internal sealed record InputCell(InputCellType Type, string Shown, RoundedNumber Number = default, DateTime Date = default)
+internal sealed class InputCell
 {
+    /// <summary>文字のセルの文字。ほかのセルでは空。</summary>
+    private readonly string text;
+
+    /// <summary>文字でないセルの、Excel で表示される文字を作る。文字のセルでは null。</summary>
+    private readonly Func<string>? shown;
+
+    /// <summary>文字でないセル。shown は、Excel で表示される文字を作る。</summary>
+    public InputCell(InputCellType type, Func<string> shown, RoundedNumber number = default, DateTime date = default)
+        : this(type, string.Empty, shown, number, date)
+    {
+    }
+
+    private InputCell(InputCellType type, string text, Func<string>? shown, RoundedNumber number, DateTime date)
+    {
+        Type = type;
+        this.text = text;
+        this.shown = shown;
+        Number = number;
+        Date = date;
+    }
+
     /// <summary>空欄のセル。</summary>
     public static InputCell Blank { get; } = Text(string.Empty);
 
-    public static InputCell Text(string text) => new(InputCellType.Text, text);
+    public InputCellType Type { get; }
+
+    public RoundedNumber Number { get; }
+
+    public DateTime Date { get; }
+
+    /// <summary>形の誤りの文に使う文字。文字のセルではその文字、ほかのセルでは Excel で表示される文字(数式のセルは空)。</summary>
+    public string Shown => shown is null ? text : shown();
 
     /// <summary>空欄か。空のセルと、空の文字のセルは空欄。</summary>
-    public bool IsBlank => Type == InputCellType.Text && Shown.Length == 0;
+    public bool IsBlank => Type == InputCellType.Text && text.Length == 0;
+
+    public static InputCell Text(string text) => new(InputCellType.Text, text, null, default, default);
 
     /// <summary>
     /// 列が受け付けるセルを、CSV と同じ形の文字にする。文字のセルはその文字のまま、数値のセルは15桁に丸めた値の数字、
@@ -60,7 +90,7 @@ internal sealed record InputCell(InputCellType Type, string Shown, RoundedNumber
     /// </summary>
     public string? TextFor(AcceptedCells accepted) => (Type, accepted) switch
     {
-        (InputCellType.Text, _) => Shown,
+        (InputCellType.Text, _) => text,
         (InputCellType.Number, AcceptedCells.Integer) => Number.IntegerText,
         (InputCellType.Number, AcceptedCells.Tenths) => Number.TenthsText,
         (InputCellType.Date, AcceptedCells.Date) when Date.TimeOfDay == TimeSpan.Zero

@@ -14,7 +14,7 @@ namespace MaintPlan.Tests;
 /// <summary>
 /// 入力のブック(.xlsx)の読み込みで、引継ぎ資料の「Excel の読み書き」の決まり2〜9と、列名のない列の扱いのとおりに読み、
 /// 形の違う値をシート・行・列とともに知らせることを確かめる。
-/// 例01-04の入力の CSV からブックを作り、セルを ClosedXML で変えて保存してから読む。期待する文は、決まりの文・利用者が決めた文言・CSV と同じ文から決め、
+/// 例01-04の入力の CSV からブックを作り、セルを ClosedXML で変えて保存してから読む。期待する文は、決まりの文・CSV と同じ文・ブックにだけある文(「シートがありません。」「文字か整数ではありません。」など)から決め、
 /// 行は、変えた行の Excel の行番号(列名の行が1行目)を手で数える。変えていない行の行番号は、CSV のファイルの行番号と同じ。
 /// 値を変えるセルは表示の書式を決めて(省けば標準)、表示される文字が値の普通の書き方になるようにする。
 /// 表示される文字と値の違いを確かめるテスト(書式「#,##0」「0000」など)では、表示される文字を書式から手で決める。
@@ -377,7 +377,7 @@ public sealed class WorkbookReaderTests : IDisposable
     [InlineData("費用内訳", "工事ID", -2d, "「-2」は0以上の整数ではありません。")]
     [InlineData("作業明細", "人数", -2d, "「-2」は0以上の整数ではありません。")]
     [InlineData("人員区分", "表示順", -2d, "「-2」は0以上の整数ではありません。")]
-    // 文字の列は、整数の数値のセルだけを受け付ける(利用者が決めた文言)
+    // 文字の列は、整数の数値のセルだけを受け付け、ほかは「文字か整数ではありません」と示す
     [InlineData("工事", "管理番号", 12.5, "「12.5」は文字か整数ではありません。")]
     // 真偽と選択項目は、文字のセルだけを受け付ける
     [InlineData("工事", "状態", 1d, "「1」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。")]
@@ -446,6 +446,47 @@ public sealed class WorkbookReaderTests : IDisposable
     }
 
     /// <summary>
+    /// 受け付けた値は、表示される文字によらない。ClosedXML 0.105.1 が表示される文字を作れない書式(「.0E+00」の 1 は DivideByZeroException)でも、
+    /// 正しい ID の数値のセルは、CSV と同じに読む。
+    /// </summary>
+    [Fact]
+    public void Accepted_cell_is_read_even_if_its_displayed_text_cannot_be_made()
+    {
+        Put("工事", 2, "ID", 1d, ".0E+00");
+
+        // ClosedXML が、このセルの表示される文字を作れないこと(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.Throws<DivideByZeroException>(() => Cell(saved, "工事", 2, "ID").GetFormattedString(DisplayCulture));
+        }
+
+        var read = PlanWorkbookReader.Read(workbookPath);
+
+        Assert.Empty(read.Errors);
+        Assert.Equal(PlanCsvReader.ReadFolder(InputDirectory).ConstructionWorks, read.Plan!.ConstructionWorks);
+    }
+
+    /// <summary>
+    /// 列に合わないセルで、表示される文字を作れないもの(指数の書式「0.00E+00」の 0 は OverflowException、「.0E+00」の 1 は DivideByZeroException)は、
+    /// 例外の種類によらず、Excel が表示できない値と同じ「########」で示す。
+    /// </summary>
+    [Theory]
+    [InlineData(0d, "0.00E+00")]
+    [InlineData(1d, ".0E+00")]
+    public void Rejected_cell_whose_displayed_text_cannot_be_made_is_shown_as_hashes(double value, string format)
+    {
+        Put("工事", 2, "状態", value, format);
+
+        // ClosedXML が、このセルの表示される文字を作れないこと(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.ThrowsAny<ArithmeticException>(() => Cell(saved, "工事", 2, "状態").GetFormattedString(DisplayCulture));
+        }
+
+        Assert.Equal(["シート「工事」 2行目 列「状態」: 「########」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。"], Errors());
+    }
+
+    /// <summary>
     /// 16桁以上の数かは、15桁に丸めたあとの値で決める。保存された 999999999999999.9 は、丸める前は10の15乗より小さいが、
     /// 15桁に丸めると 1E+15 になるので、16桁以上の数とする。
     /// </summary>
@@ -471,7 +512,7 @@ public sealed class WorkbookReaderTests : IDisposable
     [InlineData("工事", "開始日", "2027-02-10 12:00", "yyyy-mm-dd hh:mm", "「2027-02-10 12:00」は YYYY-MM-DD の日付ではありません。")]
     [InlineData("実績", "年月", "2027-02-15 00:00", "yyyy-mm-dd", "「2027-02-15」は YYYY-MM の年月ではありません。")]
     [InlineData("実績", "年月", "2027-02-01 06:00", "yyyy-mm-dd hh:mm", "「2027-02-01 06:00」は YYYY-MM の年月ではありません。")]
-    // 文字の列の日付のセル(利用者が決めた文言)
+    // 文字の列の日付のセルは、「文字か整数ではありません」と示す
     [InlineData("工事", "管理番号", "2027-03-01 00:00", "yyyy-mm-dd", "「2027-03-01」は文字か整数ではありません。")]
     [InlineData("予算年割", "予算額", "2027-03-01 00:00", "yyyy-mm-dd", "「2027-03-01」は桁区切りのない整数ではありません。")]
     // 選択の列は、文字のセルだけを受け付ける
@@ -481,6 +522,80 @@ public sealed class WorkbookReaderTests : IDisposable
         Put(sheet, 2, column, DateTime.ParseExact(dateTime, "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture), format);
 
         Assert.Equal($"シート「{sheet}」 2行目 列「{column}」: {message}", Assert.Single(Errors()));
+    }
+
+    /// <summary>
+    /// 日本語(ja-JP)の決まった日付の書式(ECMA-376 の番号 27〜31・34〜36・50〜58)のセルは、日付のセルとして読む。この書式は、書式の定義なしに番号だけで保存され、
+    /// ClosedXML 0.105.1 は数値のセルとして読む。例12/条件1の入力のブックの写しで、日付の列(工事と作業明細の開始日・終了日)と年月の列(実績の年月)の
+    /// 値のあるセルを番号だけの書式にして、CSV と同じ日付に読むことを確かめる。1904年の日付の仕組みのブックでも、同じ日付に読む。
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(JapaneseDateFormats))]
+    public void Cells_with_japanese_built_in_date_formats_are_read_as_dates(int dateFormatId, int yearMonthFormatId, bool use1904DateSystem)
+    {
+        var testCase = TestCases.Get("例12/条件1");
+        File.Copy(testCase.WorkbookPath, workbookPath, overwrite: true);
+        (string Sheet, string Column, int FormatId)[] columns =
+        [
+            ("工事", "開始日", dateFormatId),
+            ("工事", "終了日", dateFormatId),
+            ("作業明細", "開始日", dateFormatId),
+            ("作業明細", "終了日", dateFormatId),
+            ("実績", "年月", yearMonthFormatId),
+        ];
+        Edit(workbook =>
+        {
+            workbook.Use1904DateSystem = use1904DateSystem;
+            foreach (var (sheet, column, formatId) in columns)
+            {
+                foreach (var cell in ValueCells(workbook, sheet, column))
+                {
+                    cell.Style.NumberFormat.NumberFormatId = formatId;
+                }
+            }
+        });
+
+        // 番号だけの書式で保存され、ClosedXML が数値のセルとして読むこと(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.Equal(use1904DateSystem, saved.Use1904DateSystem);
+            foreach (var (sheet, column, formatId) in columns)
+            {
+                var cells = ValueCells(saved, sheet, column);
+                Assert.NotEmpty(cells);
+                Assert.All(cells, cell =>
+                {
+                    Assert.Equal(XLDataType.Number, cell.DataType);
+                    Assert.Equal(formatId, cell.Style.NumberFormat.NumberFormatId);
+                    Assert.Equal(string.Empty, cell.Style.NumberFormat.Format);
+                });
+            }
+        }
+
+        var fromWorkbook = PlanWorkbookReader.ReadWorkbook(workbookPath);
+        var fromCsv = PlanCsvReader.ReadFolder(testCase.InputDirectory);
+
+        Assert.Equal(fromCsv.ConstructionWorks, fromWorkbook.ConstructionWorks);
+        Assert.Equal(fromCsv.LaborLines, fromWorkbook.LaborLines);
+        Assert.Equal(fromCsv.ActualCosts, fromWorkbook.ActualCosts);
+    }
+
+    /// <summary>
+    /// 日本語の決まった書式のうち、時刻だけの書式(番号 32・33)の数値のセルは、日付のセルではない。日付の列では、型の誤りとしてそのセルを示す
+    /// (文の形は日付の列の決まりの文で、ここでは場所だけを確かめる)。
+    /// </summary>
+    [Theory]
+    [InlineData(32)]
+    [InlineData(33)]
+    public void Cells_with_japanese_built_in_time_formats_are_not_dates(int formatId)
+    {
+        Edit(workbook => Cell(workbook, "工事", 2, "開始日").Style.NumberFormat.NumberFormatId = formatId);
+
+        var error = Assert.Single(PlanWorkbookReader.Read(workbookPath).Errors);
+
+        Assert.Equal("シート「工事」", error.Place);
+        Assert.Equal(2, error.LineNumber);
+        Assert.Equal("開始日", error.Column);
     }
 
     /// <summary>真偽のセルは、真偽の列でも受け付けない。表示される文字は、Excel と同じ「TRUE」「FALSE」。</summary>
@@ -568,7 +683,7 @@ public sealed class WorkbookReaderTests : IDisposable
     /// <summary>
     /// 数式のセルは、計算した値の有無によらず、値のあるセルに数える。数式のセルだけの行も読み、列名のある列を CSV と同じ列の順に読んで、
     /// 数式のセルと、空欄の必須の列(工事の ID・管理番号・工事名・状態・削除済み)を示す。
-    /// ClosedXML は、数式を入れて保存したセルに計算した値を保存しないので、この行のセルは、値のない数式のセルになる(確かめ済み)。
+    /// ClosedXML 0.105.1 は、数式を入れて保存したセルに計算した値を保存しないので、この行のセルは、値のない数式のセルになる。
     /// </summary>
     [Fact]
     public void Row_with_only_a_formula_cell_is_read_and_reported()
@@ -629,6 +744,23 @@ public sealed class WorkbookReaderTests : IDisposable
         Put("工事", 1, "備考", value);
 
         Assert.Equal([$"シート「工事」 1行目: 足りない列: 備考。知らない列: {shown}"], Errors());
+    }
+
+    /// <summary>
+    /// 表示される文字を作れない列名のセル(書式「.0E+00」の 5)は、Excel が表示できない値と同じ「########」として比べるので、知らない列になる。
+    /// </summary>
+    [Fact]
+    public void Header_cell_whose_displayed_text_cannot_be_made_is_an_unknown_column()
+    {
+        Put("工事", 1, "備考", 5d, ".0E+00");
+
+        // ClosedXML が、このセル(備考の列は N 列)の表示される文字を作れないこと(テストの前提)
+        using (var saved = new XLWorkbook(workbookPath))
+        {
+            Assert.Throws<DivideByZeroException>(() => saved.Worksheet("工事").Cell("N1").GetFormattedString(DisplayCulture));
+        }
+
+        Assert.Equal(["シート「工事」 1行目: 足りない列: 備考。知らない列: ########"], Errors());
     }
 
     /// <summary>列名のない列(1行目が空のセルの列)に値のある行は、行ごとに形の誤り(列なし)にする。</summary>
@@ -768,7 +900,7 @@ public sealed class WorkbookReaderTests : IDisposable
 
     /// <summary>
     /// ブックとして開けないファイル(文字・空・ブックでない zip・パスワード付きの形・途中で切れたもの)は、
-    /// 例外の種類によらず、ファイル名を場所とする形の誤り1件にする(利用者が決めた文言)。
+    /// 例外の種類によらず、ファイル名を場所とする形の誤り1件「入力.xlsx: ブックとして読めません。」にする。
     /// </summary>
     [Theory]
     [MemberData(nameof(UnreadableWorkbooks.Kinds), MemberType = typeof(UnreadableWorkbooks))]
@@ -787,7 +919,7 @@ public sealed class WorkbookReaderTests : IDisposable
     /// <summary>
     /// Excel で開いたままのブックも読める(ほかの書き込みを許す共有で開く)。Windows でだけ動かす。
     /// ほかの OS では、.NET はほかのハンドルの共有の指定をほとんど確かめず(FileShare.None のときだけ排他のロックを取る)、
-    /// 書き込みを許さない共有で開く実装でも読めてしまうので、確かめにならない(Linux で確かめ済み)。
+    /// 書き込みを許さない共有で開く実装でも読めてしまうので、確かめにならない。
     /// </summary>
     [Fact]
     public void Workbook_opened_for_writing_elsewhere_can_be_read()
@@ -836,6 +968,17 @@ public sealed class WorkbookReaderTests : IDisposable
             ],
             errors);
     }
+
+    /// <summary>日付の列の書式の番号、年月の列の書式の番号、1904年の日付の仕組みのブックにするか。</summary>
+    public static TheoryData<int, int, bool> JapaneseDateFormats =>
+    [
+        (31, 55, false),
+        (31, 55, true),
+        .. new[] { 27, 28, 29, 30, 31, 34, 35, 36, 50, 51, 52, 53, 54, 55, 56, 57, 58 }.Select(id => (id, id, false)),
+    ];
+
+    /// <summary>表示される文字を作る文化。読み込みと同じ日本語(ja-JP)。</summary>
+    private static CultureInfo DisplayCulture => CultureInfo.GetCultureInfo("ja-JP");
 
     private List<string> Errors() => [.. PlanWorkbookReader.Read(workbookPath).Errors.Select(error => error.Message)];
 
@@ -919,6 +1062,14 @@ public sealed class WorkbookReaderTests : IDisposable
             cell.Style.NumberFormat.Format = format;
         }
     }
+
+    /// <summary>シートの、1行目の列名が column の列の、2行目からの値のあるセル。</summary>
+    private static List<IXLCell> ValueCells(XLWorkbook workbook, string sheet, string column) =>
+    [
+        .. workbook.Worksheet(sheet).Column(Cell(workbook, sheet, 1, column).Address.ColumnNumber)
+            .CellsUsed(XLCellsUsedOptions.Contents)
+            .Where(cell => cell.Address.RowNumber > 1),
+    ];
 
     /// <summary>シートの row 行目の、1行目の列名が column の列のセル。</summary>
     private static IXLCell Cell(XLWorkbook workbook, string sheet, int row, string column)

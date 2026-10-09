@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using ClosedXML.Excel;
 using MaintPlan.Core.Model;
 using MaintPlan.IO.Csv;
@@ -158,6 +159,34 @@ public sealed class InputWorkbookTests : IDisposable
         Assert.Equal(fromCsv.StaffCategories, fromWorkbook.StaffCategories);
         Assert.Equal(fromCsv.UnitRates, fromWorkbook.UnitRates);
         Assert.Equal(fromCsv.BudgetFrames, fromWorkbook.BudgetFrames);
+    }
+
+    /// <summary>
+    /// CSV から作ったブックの文字のセルは、CSV の値と同じ。先頭が「'」の管理番号と、「'」だけの工事名も「'」を残し、ブックから CSV と同じに読む。
+    /// </summary>
+    [Fact]
+    public void Created_workbook_keeps_a_leading_apostrophe()
+    {
+        var input = Path.Combine(directory, "入力");
+        Directory.CreateDirectory(input);
+        foreach (var file in Directory.EnumerateFiles(TestCases.Get("例01-04/基本").InputDirectory))
+        {
+            File.Copy(file, Path.Combine(input, Path.GetFileName(file)));
+        }
+
+        // 工事1の管理番号「例1」を「'例1」に、工事名「ポンプ更新」を「'」にする
+        var works = Path.Combine(input, "工事.csv");
+        var text = File.ReadAllText(works);
+        Assert.Contains("\n1,例1,ポンプ更新,", text, StringComparison.Ordinal);
+        File.WriteAllText(works, text.Replace("\n1,例1,ポンプ更新,", "\n1,'例1,',", StringComparison.Ordinal), new UTF8Encoding(true));
+        var workbookPath = Path.Combine(directory, TestCase.WorkbookFileName);
+
+        InputWorkbooks.Create(input, workbookPath);
+
+        var fromCsv = PlanCsvReader.ReadFolder(input);
+        Assert.Equal("'例1", fromCsv.ConstructionWorks[0].ManagementNumber);
+        Assert.Equal("'", fromCsv.ConstructionWorks[0].Name);
+        Assert.Equal(fromCsv.ConstructionWorks, PlanWorkbookReader.ReadWorkbook(workbookPath).ConstructionWorks);
     }
 
     /// <summary>

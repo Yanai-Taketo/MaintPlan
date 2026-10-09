@@ -430,7 +430,7 @@ public sealed partial class ConsoleAppTests
 
     /// <summary>
     /// ブックとして開けないファイル(文字・空・ブックでない zip・パスワード付きの形・途中で切れたもの)は、ファイル名を示して止める。
-    /// 終了コードは1(利用者が決めた文言)。
+    /// 終了コードは1。
     /// </summary>
     [Theory]
     [MemberData(nameof(UnreadableWorkbooks.Kinds), MemberType = typeof(UnreadableWorkbooks))]

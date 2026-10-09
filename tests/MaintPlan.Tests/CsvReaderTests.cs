@@ -87,6 +87,17 @@ public sealed class CsvReaderTests : IDisposable
         Assert.Contains("知らない列: 単価円", exception.Message);
     }
 
+    /// <summary>
+    /// 列名が重複する CSV は、ブックと同じ文で1行目に示し、そのファイルの行は読まない(列の数が列名の行と合わない行があっても、重複だけを示す)。
+    /// </summary>
+    [Fact]
+    public void Duplicate_column_names_are_reported_before_rows_are_read()
+    {
+        File.WriteAllText(Path.Combine(directory, "単価.csv"), "ID,人員区分ID,年度,単価,削除済み,ID\n1,1\n", new UTF8Encoding(true));
+
+        Assert.Equal(["単価.csv 1行目: 列名が重複しています: ID"], PlanCsvReader.Read(directory).Errors.Select(error => error.Message));
+    }
+
     [Fact]
     public void All_malformed_values_are_collected_in_table_and_line_order()
     {

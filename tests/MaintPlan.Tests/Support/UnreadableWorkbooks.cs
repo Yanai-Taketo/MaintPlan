@@ -4,9 +4,9 @@ using System.Text;
 namespace MaintPlan.Tests.Support;
 
 /// <summary>
-/// ブックとして開けないファイル(利用者が決めた文言の「壊れている、パスワード付きなど」)を作る。
-/// どれも、例外の種類によらず「&lt;ファイル名&gt;: ブックとして読めません。」の1件にする(作りの細部)。
-/// ClosedXML 0.105.1 は、ブックでない zip には NullReferenceException を、ほかには FileFormatException を投げる(確かめ済み)ので、
+/// ブックとして開けないファイル(壊れているもの、パスワード付きのものなど)を作る。
+/// どれも、例外の種類によらず「&lt;ファイル名&gt;: ブックとして読めません。」の1件にする。
+/// ClosedXML 0.105.1 は、ブックでない zip には NullReferenceException を、ほかには FileFormatException を投げるので、
 /// 特定の例外だけを捕まえる読み方では、どれかで止まる。
 /// </summary>
 public static class UnreadableWorkbooks

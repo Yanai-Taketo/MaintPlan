@@ -170,6 +170,27 @@ public sealed class ResultWorkbookWriterTests : IDisposable
         AssertTextCell(value, workbook.Worksheet("山積み").Cell(2, ColumnNumberOf(table, column)));
     }
 
+    /// <summary>
+    /// 文字のセルの文字は、表の値と同じ。先頭が「'」の値と「'」だけの値も、「'」を残す。
+    /// 数値のセルにする列(金額)の「'5」は、桁区切りのない整数でないので、文字のセル「'5」にする。
+    /// </summary>
+    [Fact]
+    public void Text_starting_with_an_apostrophe_keeps_it()
+    {
+        var table = new TextTable(
+            ["例", "費用内訳", "金額の種類", "年月", "金額", "理由"],
+            [["'A-01", "修繕費", "見積額", "2027-06", "'5", "'"]]);
+
+        ResultWorkbookWriter.Write(WorkbookPath, [new NamedTable("計算に使わない修正", table)]);
+
+        using var workbook = new XLWorkbook(WorkbookPath);
+        var sheet = workbook.Worksheet("計算に使わない修正");
+        AssertTextCell("'A-01", sheet.Cell("A2"));
+        AssertTextCell("'5", sheet.Cell("E2"));
+        AssertTextCell("'", sheet.Cell("F2"));
+        ResultSheets.AssertMatches(sheet, "計算に使わない修正", table);
+    }
+
     /// <summary>表示の書式を付けない。どのセルも、書式は標準(番号0)のまま。</summary>
     [Fact]
     public void Cells_have_no_number_format()
