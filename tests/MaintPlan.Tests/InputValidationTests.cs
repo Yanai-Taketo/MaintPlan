@@ -10,14 +10,19 @@ namespace MaintPlan.Tests;
 /// <summary>
 /// 入力の確認で、3章の決まり・参照先・保存できない条件に合わない行を、ファイル・行・列とともにすべて示すことを確かめる。
 /// 決まりの確認は、例01-04の入力を写して変え、期待する行と理由を、変えた内容と3章の決まりから決める。
-/// 保存できない条件は、設計書4章の例14の表の理由と値で確かめる。例14では、示す先の作業明細・費用内訳・予算年割のファイルは行が1つなので、
-/// 示す行は2行目になる。行を足したときと、ほかの違反を足したときも、例14の入力を写して変える。
+/// 保存できない条件は、設計書4章の例14と例16の表の理由と値で確かめる。例14では、示す先の作業明細・費用内訳・予算年割のファイルは行が1つなので、
+/// 示す行は2行目になる。例16では、ID を設計書に出てくる順に振る(tests/data/README.md)ので、費用内訳は修繕費が2行目・設備投資が3行目、
+/// 予算年割は修繕費の2026年度が2行目・2027年度が3行目、設備投資の2026年度が4行目になる。
+/// 行を足したときと、ほかの違反を足したときも、例14の入力を写して変える。
 /// </summary>
 public sealed class InputValidationTests : IDisposable
 {
-    /// <summary>設計書4章の例14で、保存できないケース。</summary>
+    /// <summary>設計書4章の例14と例16で、保存できないケース。</summary>
     private static readonly string[] CasesThatCannotBeSaved =
-        ["例14/変更01", "例14/変更02", "例14/変更03", "例14/変更05", "例14/変更06", "例14/変更08", "例14/変更09", "例14/変更10"];
+    [
+        "例14/変更01", "例14/変更02", "例14/変更03", "例14/変更05", "例14/変更06", "例14/変更08", "例14/変更09", "例14/変更10",
+        "例16/変更01", "例16/変更02", "例16/変更03", "例16/変更05", "例16/変更06", "例16/変更07",
+    ];
 
     private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
 
@@ -60,6 +65,8 @@ public sealed class InputValidationTests : IDisposable
     [InlineData("例14/変更09", SaveViolationKind.BudgetOverridesExceed, "予算年割.csv 2行目 列「予算額」: 2027年度の予算額の修正の合計 1,000,000 が、年割額 900,000 を超えています。")]
     // #10 修正の合計400,000が年割額(2027年度 300,000)を超える
     [InlineData("例14/変更10", SaveViolationKind.BudgetOverridesExceed, "予算年割.csv 2行目 列「予算額」: 2027年度の予算額の修正の合計 400,000 が、年割額 300,000 を超えています。")]
+    // 例16の#3 2027年度の全部の月を修正し、合計500,000が年割額600,000と一致しない。修繕費の2027年度の年割は3行目
+    [InlineData("例16/変更03", SaveViolationKind.BudgetOverridesMismatch, "予算年割.csv 3行目 列「予算額」: 2027年度の予算額の全部の月を修正していて、修正の合計 500,000 が年割額 600,000 と一致しません。")]
     public void Save_violation_is_shown_at_its_row(string caseId, SaveViolationKind kind, string text)
     {
         var read = PlanCsvReader.Read(TestCases.Get(caseId).InputDirectory);
@@ -447,6 +454,21 @@ public sealed class InputValidationTests : IDisposable
         ReplaceRows("予算年割", "2,1,2027,500000,はい", "1,1,2027,900000,いいえ");
 
         Assert.Equal(["予算年割.csv 3行目 列「予算額」: 2027年度の予算額の修正の合計 1,000,000 が、年割額 900,000 を超えています。"], Describe());
+    }
+
+    [Fact]
+    public void Every_save_violation_is_shown_at_its_row()
+    {
+        // 例16の#7(#1・#2・#5を同時に行う)。設備投資の見積額の理由は費用内訳の3行目、修繕費の2026年度と2027年度の予算額の理由は予算年割の2行目と3行目。
+        // 違反は、テーブルの順、行の順に示す。
+        UseInput("例16/変更07");
+
+        Assert.Equal(
+        [
+            "費用内訳.csv 3行目 列「見積額」: 見積額の修正の合計 900,000 が、見積額 500,000 を超えています。",
+            "予算年割.csv 2行目 列「予算額」: 2026年度の予算額の修正の合計 450,000 が、年割額 400,000 を超えています。",
+            "予算年割.csv 3行目 列「予算額」: 2027年度の予算額の修正の合計 700,000 が、年割額 600,000 を超えています。",
+        ], Describe());
     }
 
     [Fact]
