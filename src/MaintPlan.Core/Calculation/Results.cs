@@ -148,11 +148,12 @@ public enum AggregationColumnKind
     FiscalYearTotal,
 }
 
-/// <summary>山積みの集計の結果。</summary>
+/// <summary>山積みの集計の結果。Condition は、集計に使った条件。</summary>
 public sealed record AggregationResult(
     IReadOnlyList<AggregationCell> Cells,
     IReadOnlyList<LaborBreakdownCell> LaborBreakdown,
-    IReadOnlyList<int> MissingAmountCostItemIds);
+    IReadOnlyList<int> MissingAmountCostItemIds,
+    AggregationCondition Condition);
 
 /// <summary>山積みの欄ごとの金額と人工(10倍した整数)。</summary>
 public sealed record AggregationCell(AggregationColumn Column, long Amount, long ManDaysTenths);
@@ -211,4 +212,42 @@ public enum SaveViolationKind
     BudgetOverridesExceed,
     /// <summary>予算額の全部の月の修正の合計が年割額と一致しない</summary>
     BudgetOverridesMismatch,
+}
+
+/// <summary>入力の確認の結果。</summary>
+public sealed record InputValidationResult(IReadOnlyList<InputViolation> Violations)
+{
+    public bool IsValid => Violations.Count == 0;
+}
+
+/// <summary>
+/// 入力の決まりに合わない行。行は、PlanData のそのテーブルの一覧での位置(0から数える)で示す。
+/// Columns は当たる項目(設計書3章の項目名)、Message は理由の文。
+/// 重複の理由は、同じ値の最初の行の位置(FirstRowIndex)を持つ。保存できない理由は、保存の確認の結果(SaveViolation)を持つ。
+/// </summary>
+public sealed record InputViolation(
+    InputViolationKind Kind,
+    PlanTable Table,
+    int RowIndex,
+    IReadOnlyList<string> Columns,
+    string Message,
+    int? FirstRowIndex = null,
+    SaveViolation? SaveViolation = null);
+
+public enum InputViolationKind
+{
+    /// <summary>ID が重複している</summary>
+    DuplicateId,
+    /// <summary>重複なしの項目(管理番号、工事番号、項目の組み合わせ)が重複している</summary>
+    DuplicateValue,
+    /// <summary>開始日と終了日の片方だけが入っている</summary>
+    DatesNotPaired,
+    /// <summary>終了日が開始日より前</summary>
+    EndBeforeStart,
+    /// <summary>参照先の行がない</summary>
+    MissingReference,
+    /// <summary>月別修正の金額の種類が、予算額でも見積額でもない</summary>
+    InvalidOverrideKind,
+    /// <summary>保存できない条件に当たる</summary>
+    CannotSave,
 }

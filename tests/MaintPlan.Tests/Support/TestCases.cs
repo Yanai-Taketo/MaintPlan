@@ -9,7 +9,12 @@ public sealed record TestCase(string Id, string DirectoryPath, IReadOnlyDictiona
 {
     public const string CaseFileName = "ケース.csv";
 
+    public const string WorkbookFileName = "入力.xlsx";
+
     public string InputDirectory => Path.Combine(DirectoryPath, "入力");
+
+    /// <summary>「入力」フォルダの CSV と同じ中身のブック。例12・例13のケースにだけ置く。</summary>
+    public string WorkbookPath => Path.Combine(DirectoryPath, WorkbookFileName);
 
     public string ExpectedDirectory => Path.Combine(DirectoryPath, "期待値");
 

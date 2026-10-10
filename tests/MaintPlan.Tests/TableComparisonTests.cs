@@ -117,6 +117,17 @@ public sealed class TableComparisonTests : IDisposable
     }
 
     [Theory]
+    [InlineData("いいえ,作業明細の期間が工期の外")]
+    [InlineData("いいえ,見積額の修正の合計が見積額を超える、予算額の修正の合計が年割額を超える")]
+    [InlineData("はい,")]
+    public void Reason_kinds_can_be_one_or_more(string line)
+    {
+        var expected = Expected("保存の確認.csv", "保存できる,理由の種類", line);
+
+        Assert.Equal("保存の確認", expected.Kind.Name);
+    }
+
+    [Theory]
     [InlineData("月ごとの値.csv", "例,年月,予算額", "例1,2027-02,\"609,168\"")]
     [InlineData("月ごとの値.csv", "例,年月,人工", "例1,2027-02,8.75")]
     [InlineData("月ごとの値.csv", "例,年月,人工", "例1,2027-02,8.")]
@@ -127,6 +138,10 @@ public sealed class TableComparisonTests : IDisposable
     [InlineData("山積み.csv", "欄,予算額", "2027年度 5Q,100")]
     [InlineData("人工の月ごとの内訳.csv", "例,人員区分,行,年月,人工", "例1,直営,1,2027-02,1.0")]
     [InlineData("知らない種類.csv", "例,年月", "例1,2027-02")]
+    // 理由の種類は、重複なしで README の順に「、」でつなぐ
+    [InlineData("保存の確認.csv", "保存できる,理由の種類", "いいえ,予算額の修正の合計が年割額を超える、見積額の修正の合計が見積額を超える")]
+    [InlineData("保存の確認.csv", "保存できる,理由の種類", "いいえ,予算額の修正の合計が年割額を超える、予算額の修正の合計が年割額を超える")]
+    [InlineData("保存の確認.csv", "保存できる,理由の種類", "いいえ,予算額の修正の合計が年割額を超える、")]
     public void Malformed_expected_file_is_rejected(string fileName, params string[] lines)
     {
         Assert.Throws<CsvFormatException>(() => Expected(fileName, lines));

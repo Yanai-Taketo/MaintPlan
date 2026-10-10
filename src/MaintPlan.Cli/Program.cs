@@ -1,2 +1,3 @@
-Console.Error.WriteLine("未実装です。");
-return 1;
+using MaintPlan.Cli;
+
+return ConsoleApp.Run(args, Console.Out, Console.Error, JapanDate.Of(DateTimeOffset.UtcNow));

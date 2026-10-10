@@ -65,3 +65,26 @@ public enum Priority
     /// <summary>低</summary>
     Low,
 }
+
+/// <summary>計算に使う9つのテーブル。</summary>
+public enum PlanTable
+{
+    /// <summary>工事</summary>
+    ConstructionWork,
+    /// <summary>費用内訳</summary>
+    CostItem,
+    /// <summary>予算年割</summary>
+    AnnualBudget,
+    /// <summary>実績</summary>
+    ActualCost,
+    /// <summary>月別修正</summary>
+    MonthlyOverride,
+    /// <summary>作業明細</summary>
+    LaborLine,
+    /// <summary>人員区分</summary>
+    StaffCategory,
+    /// <summary>単価</summary>
+    UnitRate,
+    /// <summary>予算枠</summary>
+    BudgetFrame,
+}

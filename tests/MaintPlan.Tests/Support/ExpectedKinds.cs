@@ -25,6 +25,19 @@ public sealed record ColumnType(string Description, Func<string, bool> IsValid, 
         return new(string.Join("・", set) + "のどれか", set.Contains, text => text, text => text.Length == 0);
     }
 
+    /// <summary>labels のどれかを、重複なしで labels の順に「、」でつないだもの(1つだけでもよい)。</summary>
+    public static ColumnType ListOf(IEnumerable<string> labels)
+    {
+        var order = labels.ToList();
+        return new(
+            string.Join("・", order) + "のどれかを、重複なしでこの順に「、」でつないだもの",
+            text => text.Split('、').Select(item => order.IndexOf(item)).ToList() is var positions
+                && positions.All(position => position >= 0)
+                && positions.Zip(positions.Skip(1)).All(pair => pair.First < pair.Second),
+            text => text,
+            text => text.Length == 0);
+    }
+
     /// <summary>桁区切りのない整数。tokens に挙げた文字(「未入力」など)も書ける。</summary>
     public static ColumnType Integer(params string[] tokens)
     {
@@ -144,7 +157,7 @@ public static class ExpectedKinds
             new Dictionary<string, ColumnType>
             {
                 ["保存できる"] = ColumnType.OneOf(["はい", "いいえ"]),
-                ["理由の種類"] = ColumnType.OneOf(Labels.All<SaveViolationKind>()),
+                ["理由の種類"] = ColumnType.ListOf(Labels.All<SaveViolationKind>()),
             },
             IgnoredColumns: ["結果"]),
     ];

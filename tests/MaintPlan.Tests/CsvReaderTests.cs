@@ -1,10 +1,11 @@
 using System.Text;
+using MaintPlan.Core.Model;
 using MaintPlan.IO.Csv;
 using MaintPlan.Tests.Support;
 
 namespace MaintPlan.Tests;
 
-/// <summary>入力の CSV の読み込みで、形の違う値をファイル・行・列とともに知らせることを確かめる。</summary>
+/// <summary>入力の CSV の読み込みで、形の違う値をファイル・行・列とともに知らせ、行のファイルでの場所を残すことを確かめる。</summary>
 public sealed class CsvReaderTests : IDisposable
 {
     private readonly string directory = Path.Combine(Path.GetTempPath(), "MaintPlan.Tests", Guid.NewGuid().ToString("N"));
@@ -86,14 +87,118 @@ public sealed class CsvReaderTests : IDisposable
         Assert.Contains("知らない列: 単価円", exception.Message);
     }
 
-    private void ReplaceFirstRowCell(string table, string column, string value)
+    /// <summary>
+    /// 列名が重複する CSV は、ブックと同じ文で1行目に示し、そのファイルの行は読まない(列の数が列名の行と合わない行があっても、重複だけを示す)。
+    /// </summary>
+    [Fact]
+    public void Duplicate_column_names_are_reported_before_rows_are_read()
+    {
+        File.WriteAllText(Path.Combine(directory, "単価.csv"), "ID,人員区分ID,年度,単価,削除済み,ID\n1,1\n", new UTF8Encoding(true));
+
+        Assert.Equal(["単価.csv 1行目: 列名が重複しています: ID"], PlanCsvReader.Read(directory).Errors.Select(error => error.Message));
+    }
+
+    [Fact]
+    public void All_malformed_values_are_collected_in_table_and_line_order()
+    {
+        ReplaceCell("予算年割", 3, "年度", "20x7");
+        ReplaceCell("予算年割", 3, "予算額", "");
+        ReplaceCell("工事", 4, "状態", "施工ちゅう");
+
+        var read = PlanCsvReader.Read(directory);
+
+        Assert.Null(read.Plan);
+        Assert.Null(read.Source);
+        Assert.Equal(
+            [
+                "工事.csv 4行目 列「状態」: 「施工ちゅう」は計画中・承認済み・発注済み・施工中・完了・中止のどれかではありません。",
+                "予算年割.csv 3行目 列「年度」: 「20x7」は西暦4桁の年度ではありません。",
+                "予算年割.csv 3行目 列「予算額」: 空欄にできません。",
+            ],
+            read.Errors.Select(error => error.Message));
+        Assert.Equal(read.Errors[0].Message, Assert.Throws<CsvFormatException>(() => PlanCsvReader.ReadFolder(directory)).Message);
+    }
+
+    [Fact]
+    public void Override_kind_lists_only_budget_and_estimate()
+    {
+        ReplaceFirstRowCell("月別修正", "金額の種類", "実績額");
+
+        Assert.Equal(
+            "月別修正.csv 2行目 列「金額の種類」: 「実績額」は予算額・見積額のどれかではありません。",
+            Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
+    /// <summary>
+    /// 整数の列(ID・参照の ID・人数・表示順)と作業日数は0以上だけを受け付け、負の値は0以上の数でないと示す。
+    /// 負でない形の誤り(整数の列の小数、作業日数の小数点以下2桁)も、同じ文で示す。
+    /// </summary>
+    [Theory]
+    [InlineData("作業明細", "人数", "1.5", "作業明細.csv 2行目 列「人数」: 「1.5」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "作業日数", "10.25", "作業明細.csv 2行目 列「作業日数」: 「10.25」は0以上の、小数点以下1桁までの数ではありません。")]
+    [InlineData("工事", "ID", "-2", "工事.csv 2行目 列「ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("費用内訳", "工事ID", "-2", "費用内訳.csv 2行目 列「工事ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("実績", "費用内訳ID", "-2", "実績.csv 2行目 列「費用内訳ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("単価", "人員区分ID", "-2", "単価.csv 2行目 列「人員区分ID」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "人数", "-2", "作業明細.csv 2行目 列「人数」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("人員区分", "表示順", "-2", "人員区分.csv 2行目 列「表示順」: 「-2」は0以上の整数ではありません。")]
+    [InlineData("作業明細", "作業日数", "-1.5", "作業明細.csv 2行目 列「作業日数」: 「-1.5」は0以上の、小数点以下1桁までの数ではありません。")]
+    public void Integer_and_work_day_errors_say_zero_or_more(string table, string column, string value, string message)
+    {
+        ReplaceFirstRowCell(table, column, value);
+
+        Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
+    /// <summary>日付と年月の列の誤りの文は、「は」の後に半角の空白を置く(ブックから読んだときと同じ文)。</summary>
+    [Theory]
+    [InlineData("作業明細", "開始日", "2027/03/01", "作業明細.csv 2行目 列「開始日」: 「2027/03/01」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("工事", "開始日", "2027-02-30", "工事.csv 2行目 列「開始日」: 「2027-02-30」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("実績", "年月", "2027-13", "実績.csv 2行目 列「年月」: 「2027-13」は YYYY-MM の年月ではありません。")]
+    [InlineData("月別修正", "年月", "2027/06", "月別修正.csv 2行目 列「年月」: 「2027/06」は YYYY-MM の年月ではありません。")]
+    public void Date_and_year_month_errors_have_a_space_after_ha(string table, string column, string value, string message)
+    {
+        ReplaceFirstRowCell(table, column, value);
+
+        Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
+    [Fact]
+    public void File_problems_of_all_tables_are_collected()
+    {
+        File.Delete(Path.Combine(directory, "実績.csv"));
+        File.WriteAllText(Path.Combine(directory, "単価.csv"), "ID,人員区分ID,年度,単価円,削除済み\n", new UTF8Encoding(true));
+
+        var read = PlanCsvReader.Read(directory);
+
+        Assert.Equal(["実績.csv: ファイルがありません。", "単価.csv 1行目: 足りない列: 単価。知らない列: 単価円"], read.Errors.Select(error => error.Message));
+    }
+
+    [Fact]
+    public void Source_has_the_file_and_line_of_each_row()
+    {
+        ReplaceFirstRowCell("工事", "備考", "\"一行目\n二行目\"");
+
+        var read = PlanCsvReader.Read(directory);
+
+        Assert.Empty(read.Errors);
+        var works = read.Source!.Tables[PlanTable.ConstructionWork];
+        Assert.Equal(Path.Combine(directory, "工事.csv"), works.FilePath);
+        Assert.Equal([2, 4, 5, 6], works.LineNumbers);
+        Assert.Equal(9, read.Source.Tables.Count);
+    }
+
+    private void ReplaceFirstRowCell(string table, string column, string value) => ReplaceCell(table, 2, column, value);
+
+    /// <summary>ファイルの lineNumber 行目(1行目が列名)の、column の列の値を置き換える。改行は CRLF でも LF でもよい。</summary>
+    private void ReplaceCell(string table, int lineNumber, string column, string value)
     {
         var path = Path.Combine(directory, table + ".csv");
-        var lines = File.ReadAllText(path).Split('\n').ToList();
-        var header = lines[0].TrimStart('﻿').Split(',');
-        var cells = lines[1].Split(',');
+        var lines = File.ReadAllLines(path);
+        var header = lines[0].TrimStart('\ufeff').Split(',');
+        var cells = lines[lineNumber - 1].Split(',');
         cells[Array.IndexOf(header, column)] = value;
-        lines[1] = string.Join(',', cells);
-        File.WriteAllText(path, string.Join('\n', lines), new UTF8Encoding(true));
+        lines[lineNumber - 1] = string.Join(',', cells);
+        File.WriteAllText(path, string.Join('\n', lines) + "\n", new UTF8Encoding(true));
     }
 }

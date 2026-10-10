@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using MaintPlan.Core.Model;
 
 namespace MaintPlan.Core.Calculation;
@@ -11,9 +12,11 @@ public static class QuarterlyAggregation
     /// 人工は金額の種類によらず作業明細から求め、人員区分の種別ごとと区分ごとの内訳も出す。
     /// 欄は、金額か人工の値が1件でも入ったものと、その年度の合計を、欄の順に返す。
     /// 金額が未入力の費用内訳は0円として集計し、その ID を返す。
+    /// 結果には集計に使った条件を持たせる。条件の集合は写しを使い、呼び出し側が後で集合を変えても結果の条件は変わらない。
     /// </summary>
     public static AggregationResult Calculate(PlanData plan, AggregationCondition condition)
     {
+        condition = condition with { Statuses = condition.Statuses.ToFrozenSet(), Categories = condition.Categories.ToFrozenSet() };
         var works = plan.ConstructionWorks.ToDictionary(work => work.Id);
         var laborLines = plan.LaborLines.ToDictionary(line => line.Id);
         var categories = plan.StaffCategories.ToDictionary(category => category.Id);
@@ -52,7 +55,7 @@ public static class QuarterlyAggregation
             .ToList();
         var missing = CalculationTargets.MissingAmountCostItemIds(plan, condition.AmountKind).Where(items.Contains).Order().ToList();
 
-        return new AggregationResult(cells, breakdown, missing);
+        return new AggregationResult(cells, breakdown, missing, condition);
     }
 
     /// <summary>月ごとの値が入る欄。月はその年度と四半期の欄、時期未定はその時期未定の欄とし、年度があればその年度の合計の欄も返す。</summary>
