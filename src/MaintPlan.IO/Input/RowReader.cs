@@ -36,11 +36,13 @@ internal sealed partial class RowReader(InputTable table, InputRow row, ICollect
     public int? OptionalFiscalYear(string column) =>
         Parse<int>(column, AcceptedCells.Integer, text => FiscalYearPattern().IsMatch(text) ? int.Parse(text, CultureInfo.InvariantCulture) : null, "西暦4桁の年度");
 
+    /// <summary>日付。YYYY-MM-DD。誤りの文は「「X」は YYYY-MM-DD の日付ではありません。」の形で、「は」の後に半角の空白を置く。</summary>
     public DateOnly? OptionalDate(string column) =>
-        Parse<DateOnly>(column, AcceptedCells.Date, text => DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value) ? value : null, "YYYY-MM-DD の日付");
+        Parse<DateOnly>(column, AcceptedCells.Date, text => DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var value) ? value : null, " YYYY-MM-DD の日付");
 
+    /// <summary>年月。YYYY-MM。誤りの文は「「X」は YYYY-MM の年月ではありません。」の形で、「は」の後に半角の空白を置く。</summary>
     public YearMonth Month(string column) =>
-        Required(column, name => Parse<YearMonth>(name, AcceptedCells.YearMonth, text => YearMonth.TryParse(text, out var value) ? value : null, "YYYY-MM の年月"));
+        Required(column, name => Parse<YearMonth>(name, AcceptedCells.YearMonth, text => YearMonth.TryParse(text, out var value) ? value : null, " YYYY-MM の年月"));
 
     /// <summary>真偽。「はい」か「いいえ」。</summary>
     public bool Bool(string column) =>

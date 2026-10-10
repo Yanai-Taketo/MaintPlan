@@ -150,6 +150,19 @@ public sealed class CsvReaderTests : IDisposable
         Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
     }
 
+    /// <summary>日付と年月の列の誤りの文は、「は」の後に半角の空白を置く(ブックから読んだときと同じ文)。</summary>
+    [Theory]
+    [InlineData("作業明細", "開始日", "2027/03/01", "作業明細.csv 2行目 列「開始日」: 「2027/03/01」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("工事", "開始日", "2027-02-30", "工事.csv 2行目 列「開始日」: 「2027-02-30」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("実績", "年月", "2027-13", "実績.csv 2行目 列「年月」: 「2027-13」は YYYY-MM の年月ではありません。")]
+    [InlineData("月別修正", "年月", "2027/06", "月別修正.csv 2行目 列「年月」: 「2027/06」は YYYY-MM の年月ではありません。")]
+    public void Date_and_year_month_errors_have_a_space_after_ha(string table, string column, string value, string message)
+    {
+        ReplaceFirstRowCell(table, column, value);
+
+        Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
     [Fact]
     public void File_problems_of_all_tables_are_collected()
     {

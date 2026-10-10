@@ -17,8 +17,8 @@ public static class PlanWorkbookReader
     private static readonly CultureInfo DisplayCulture = CultureInfo.GetCultureInfo("ja-JP");
 
     /// <summary>
-    /// Excel が、日付と時刻の書式で表示できない値(9999-12-31 より後の日付など)のセルに表示する文字。Excel は、セルを「#」で埋めて表示する。
-    /// ClosedXML が表示される文字を作れないセルも、この文字で示す。
+    /// Excel が、日付と時刻の書式で表示できない値(1900年の日付の仕組みの負の値や、9999-12-31 より後の日付など)のセルに表示する文字。Excel は、セルを「#」で埋めて表示する。
+    /// ClosedXML が表示される文字を作れないセル(書式「.0E+00」の数値など)も、この文字で示す。
     /// </summary>
     private const string Unshowable = "########";
 
@@ -30,6 +30,12 @@ public static class PlanWorkbookReader
 
     /// <summary>1904年の日付の仕組みのシリアル値を、1900年の仕組みの値に直すときに足す日数(1904-01-01 は、1900年の仕組みでは 1462)。</summary>
     private const double Date1904Offset = 1462;
+
+    /// <summary>1900年の日付の仕組みで、実在しない 1900-02-29 のシリアル値。Excel は、1900年をうるう年として数える。</summary>
+    private const double LeapDay1900 = 60;
+
+    /// <summary>1900年の日付の仕組みで、9999-12-31 の次の日のシリアル値。これより後は日付にできない。</summary>
+    private const double AfterLastDay1900 = 2958466;
 
     /// <summary>
     /// ブックを読む。形の違う値は、最初の1件で止めずにすべて集める。形の違う値がなければ、読んだ内容と、行のシートでの場所を返す。
@@ -136,7 +142,7 @@ public static class PlanWorkbookReader
     /// <summary>
     /// ブックのセルを、型を持つセルにする。文字のセルは、その文字で読む。表示される文字は、形の誤りの文を作るときにだけ作る。
     /// 数式のセルは、計算した値を読まない(表示される文字も作らない)。日本語の決まった日付の書式(JapaneseDateFormatIds)の数値のセルは、日付のセルとする。
-    /// 日付にできない値の日付のセルは、どの列も受け付けないセルにする。
+    /// 日付として正しくない値の日付のセルは、どの列も受け付けないセルにする(DateCell)。
     /// </summary>
     private static InputCell CellOf(IXLCell cell)
     {
@@ -146,44 +152,59 @@ public static class PlanWorkbookReader
         }
 
         var value = cell.Value;
+        var use1904DateSystem = cell.Worksheet.Workbook.Use1904DateSystem;
         return value.Type switch
         {
             XLDataType.Text => InputCell.Text(value.GetText()),
-            XLDataType.Number when JapaneseDateFormatIds.Contains(cell.Style.NumberFormat.NumberFormatId)
-                => DateCell(cell, SerialDateOf(value.GetNumber(), cell.Worksheet.Workbook.Use1904DateSystem)),
+            XLDataType.Number when JapaneseDateFormatIds.Contains(cell.Style.NumberFormat.NumberFormatId) => DateCell(cell, value.GetNumber(), use1904DateSystem),
             XLDataType.Number => new InputCell(InputCellType.Number, () => Shown(cell), number: RoundedNumber.Of(value.GetNumber())),
-            XLDataType.DateTime => DateCell(cell, DateOf(value)),
+            XLDataType.DateTime => DateCell(cell, StoredSerialOf(value.GetUnifiedNumber(), use1904DateSystem), use1904DateSystem),
             _ => new InputCell(InputCellType.Other, () => Shown(cell)),
         };
     }
 
-    /// <summary>日付のセル。日付にできない値(date が null)なら、Excel と同じく Unshowable と表示される、どの列も受け付けないセル。</summary>
-    private static InputCell DateCell(IXLCell cell, DateTime? date) =>
-        date is { } value
-            ? new InputCell(InputCellType.Date, () => Shown(cell), date: value)
-            : new InputCell(InputCellType.Other, () => Unshowable);
-
-    /// <summary>日付のセルの日時。日付にできない値(9999-12-31 より後など)なら null。</summary>
-    private static DateTime? DateOf(XLCellValue value)
+    /// <summary>
+    /// 日付のセル。serial はブックに保存されたシリアル値(ブックの日付の仕組みの値)。
+    /// 日付として正しくない値のセルは、決まり8の列に合わない型のセルとして、どの列も受け付けないセルにする。正しくないのは、1900年の仕組みで1より小さい値と
+    /// LeapDay1900 の日(60以上61未満)、1904年の仕組みで0より小さい値、9999-12-31 より後の値。負の値と 9999-12-31 より後の値は、表示される文字を Unshowable とする
+    /// (1900年の仕組みの負の値は、Excel が日付として表示できない。1904年の仕組みの負の値は、ClosedXML 0.105.1 が日付の書式のセルを別の日付に直して読むので、表示される文字が値を表さない)。
+    /// ほかの正しくない値は、表示される文字で示す(日付の書式の 0 は「1900-01-00」、60 は「1900-02-29」)。
+    /// </summary>
+    private static InputCell DateCell(IXLCell cell, double serial, bool use1904DateSystem)
     {
-        try
+        if (serial < 0)
         {
-            return value.GetDateTime();
+            return new InputCell(InputCellType.Other, () => Unshowable);
         }
-        catch (ArgumentException)
+
+        if (!use1904DateSystem && serial is < 1 or (>= LeapDay1900 and < LeapDay1900 + 1))
         {
-            return null;
+            return new InputCell(InputCellType.Other, () => Shown(cell));
         }
+
+        return DateOf(use1904DateSystem ? serial + Date1904Offset : serial) is { } date
+            ? new InputCell(InputCellType.Date, () => Shown(cell), date: date)
+            : new InputCell(InputCellType.Other, () => Unshowable);
     }
 
     /// <summary>
-    /// 数値のセルの値を日付のシリアル値として、ClosedXML が日付のセルを読むときと同じに日時にする。1904年の日付の仕組みのブックの値は、
-    /// ClosedXML が日付のセルを読むときと同じく、1900年の仕組みの値に直してから日時にする。日付にできない値なら null。
+    /// 日付のセルの値(ClosedXML の GetUnifiedNumber)から、ブックに保存されたシリアル値を戻す。ClosedXML 0.105.1 は、1900年の日付の仕組みのブックでは、
+    /// 保存された値をそのまま持つ(60 と 61 は、日時ではどちらも 1900-03-01 になるが、この値で見分けられる)。1904年の仕組みのブックでは、読むときに、
+    /// 保存された値 s を1900年の仕組みの値として日時にしてから1462日を足して持つので、s が60以下なら s + 1463、61以上なら s + 1462 になる。
+    /// s が 60 と 61 は、どちらも 1523 になるので 61 に戻すが、どちらも正しい日付なので、日付として正しいかは変わらない。
     /// </summary>
-    private static DateTime? SerialDateOf(double serial, bool use1904DateSystem)
+    private static double StoredSerialOf(double value, bool use1904DateSystem) =>
+        !use1904DateSystem ? value
+            : value < LeapDay1900 + 1 + Date1904Offset ? value - (Date1904Offset + 1)
+            : value - Date1904Offset;
+
+    /// <summary>
+    /// 1900年の日付の仕組みのシリアル値を、ClosedXML が日付のセルを読むときと同じに日時にする。9999-12-31 より後の値なら null。
+    /// </summary>
+    private static DateTime? DateOf(double serial)
     {
-        XLCellValue value = use1904DateSystem ? serial + Date1904Offset : serial;
-        return value.TryConvert(out DateTime date) ? date : null;
+        XLCellValue value = serial;
+        return serial < AfterLastDay1900 && value.TryConvert(out DateTime date) ? date : null;
     }
 
     /// <summary>

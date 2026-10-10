@@ -54,6 +54,12 @@ public static class ConsoleApp
 
         var readsWorkbook = !Directory.Exists(arguments.InputPath);
         var writesWorkbook = IsWorkbook(arguments.OutputPath);
+        if (readsWorkbook && writesWorkbook && IsSamePath(arguments.InputPath, arguments.OutputPath))
+        {
+            error.WriteLine($"入力と出力先に同じブックは指定できません: {arguments.OutputPath}");
+            return UsageError;
+        }
+
         if (!writesWorkbook && File.Exists(Path.TrimEndingDirectorySeparator(arguments.OutputPath)))
         {
             error.WriteLine($"出力先にはフォルダを指定します。同じ名前のファイルがあります: {arguments.OutputPath}");
@@ -176,6 +182,13 @@ public static class ConsoleApp
 
     /// <summary>パスの末尾が .xlsx か。</summary>
     private static bool IsWorkbook(string path) => path.EndsWith(WorkbookExtension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>2つのパスが同じか。フルパスにして比べ、Windows と macOS では大文字と小文字を区別しない。</summary>
+    private static bool IsSamePath(string path, string other) =>
+        string.Equals(
+            Path.GetFullPath(path),
+            Path.GetFullPath(other),
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     /// <summary>
     /// 上書きするファイル(CSV かブック)が、ほかで(Excel などで)開かれていないことと、書き出すファイルと同じ名前のフォルダがないことを確かめる。

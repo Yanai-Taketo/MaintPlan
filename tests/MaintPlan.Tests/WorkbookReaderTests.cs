@@ -235,8 +235,8 @@ public sealed class WorkbookReaderTests : IDisposable
     [InlineData("予算年割", "年度", "20x7", "「20x7」は西暦4桁の年度ではありません。")]
     [InlineData("予算年割", "予算額", "1,603,076", "「1,603,076」は桁区切りのない整数ではありません。")]
     [InlineData("作業明細", "作業日数", "10.25", "「10.25」は0以上の、小数点以下1桁までの数ではありません。")]
-    [InlineData("作業明細", "開始日", "2027/03/01", "「2027/03/01」はYYYY-MM-DD の日付ではありません。")]
-    [InlineData("実績", "年月", "2027-13", "「2027-13」はYYYY-MM の年月ではありません。")]
+    [InlineData("作業明細", "開始日", "2027/03/01", "「2027/03/01」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("実績", "年月", "2027-13", "「2027-13」は YYYY-MM の年月ではありません。")]
     [InlineData("月別修正", "金額の種類", "実績額", "「実績額」は予算額・見積額のどれかではありません。")]
     public void Malformed_text_cell_is_reported_like_csv(string sheet, string column, string text, string message)
     {
@@ -362,8 +362,7 @@ public sealed class WorkbookReaderTests : IDisposable
     /// 丸めた絶対値が10の15乗以上なら16桁以上の数と示す。日付・年月・真偽・選択の列は、数値のセルを受け付けない。書式は標準。
     /// </summary>
     [Theory]
-    // 日付・年月の列の数値のセル。文は決まり8の例のまま(「は」の後に空白)。
-    // D1(利用者に確認中:決まり4の CSV と同じ文か、決まり8の例の文か)の答えが出るまで、この2行は落ちたままにする
+    // 日付・年月の列は、数値のセルを受け付けない。日付と年月の列の文は、CSV と同じく「は」の後に半角の空白を置く
     [InlineData("工事", "開始日", 46113d, "「46113」は YYYY-MM-DD の日付ではありません。")]
     [InlineData("実績", "年月", 46082d, "「46082」は YYYY-MM の年月ではありません。")]
     [InlineData("作業明細", "作業日数", 10.25, "「10.25」は0以上の、小数点以下1桁までの数ではありません。")]
@@ -505,10 +504,9 @@ public sealed class WorkbookReaderTests : IDisposable
 
     /// <summary>
     /// 列に合わない日付のセルは、表示される文字で示す。日付の列は時刻のある日付、年月の列は1日でないか時刻のある日付を受け付けない。
-    /// 日付と年月の列の文は、数値のセル(46113)と同じく決まり8の例の形(「は」の後に空白)にする。時刻は、2進数で割り切れる時刻にする。
+    /// 日付と年月の列の文は、CSV と同じく「は」の後に半角の空白を置く。時刻は、2進数で割り切れる時刻にする。
     /// </summary>
     [Theory]
-    // D1(利用者に確認中)の答えが出るまで、日付・年月の列の3行は落ちたままにする
     [InlineData("工事", "開始日", "2027-02-10 12:00", "yyyy-mm-dd hh:mm", "「2027-02-10 12:00」は YYYY-MM-DD の日付ではありません。")]
     [InlineData("実績", "年月", "2027-02-15 00:00", "yyyy-mm-dd", "「2027-02-15」は YYYY-MM の年月ではありません。")]
     [InlineData("実績", "年月", "2027-02-01 06:00", "yyyy-mm-dd hh:mm", "「2027-02-01 06:00」は YYYY-MM の年月ではありません。")]
@@ -598,6 +596,72 @@ public sealed class WorkbookReaderTests : IDisposable
         Assert.Equal("開始日", error.Column);
     }
 
+    /// <summary>
+    /// 日付として正しくない日付のセルは、日付・年月の列で、列に合わない型のセルとして示す。正しくないのは、1900年の日付の仕組みでシリアル値が1より小さいもの(0・負)と
+    /// 60(実在しない 1900-02-29。時刻のある 60.5 も)、1904年の仕組みで0より小さいもの、9999-12-31 より後のもの(1900年の仕組みで 2958466 から、1904年の仕組みで 2957004 から)。
+    /// 日付の書式のセルの表示される文字は、Excel と同じく、0 は「1900-01-00」、60 は「1900-02-29」。日本語の決まった日付の書式のセルは、
+    /// ClosedXML 0.105.1 がこの書式を知らないので、表示される文字は標準の書式の数(0 は「0」)。負の値と 9999-12-31 より後の値は「########」で示す。
+    /// ClosedXML 0.105.1 は、1900年の仕組みの 60 を 61 と同じ 1900-03-01 の日時として読み、1904年の仕組みの -1 を 1904-01-01 の日時として読むが、どちらも誤りにする。
+    /// </summary>
+    [Theory]
+    // 日付の書式(yyyy-mm-dd)のセル
+    [InlineData(false, false, 0d, "1900-01-00")]
+    [InlineData(false, false, 0.5, "1900-01-00")]
+    [InlineData(false, false, -1d, "########")]
+    [InlineData(false, false, 60d, "1900-02-29")]
+    [InlineData(false, false, 60.5, "1900-02-29")]
+    [InlineData(false, false, 2958466d, "########")]
+    [InlineData(false, true, -1d, "########")]
+    // 日本語の決まった日付の書式(番号 31 と 55)のセル
+    [InlineData(true, false, 0d, "0")]
+    [InlineData(true, false, -1d, "########")]
+    [InlineData(true, false, 60d, "60")]
+    [InlineData(true, false, 2958466d, "########")]
+    [InlineData(true, true, -1d, "########")]
+    [InlineData(true, true, 2957004d, "########")]
+    public void Date_cell_that_is_not_a_real_date_is_reported(bool japaneseFormat, bool use1904DateSystem, double serial, string shown)
+    {
+        PutSerials(japaneseFormat, use1904DateSystem, serial, serial);
+
+        Assert.Equal(
+            [
+                $"シート「工事」 2行目 列「開始日」: 「{shown}」は YYYY-MM-DD の日付ではありません。",
+                $"シート「実績」 2行目 列「年月」: 「{shown}」は YYYY-MM の年月ではありません。",
+            ],
+            Errors());
+    }
+
+    /// <summary>
+    /// 日付として正しい日付の端のセルは読む。1900年の日付の仕組みの 1(1900-01-01)と 61(1900-03-01)、2958465(9999-12-31)、
+    /// 1904年の仕組みの 0(1904-01-01)・59(1904-02-29)・61(1904-03-02)と 2957003(9999-12-31)。
+    /// 年月の列は、1日のシリアル値(1904-02-01 は 31、1904-04-01 は 91、9999-12-01 は、1900年の仕組みで 2958435、1904年の仕組みで 2956973)。
+    /// 1904年の仕組みの日付の書式のセルの 60(1904-03-01)は確かめない。ClosedXML 0.105.1 は、60 と 61 を同じ値にして読むので、61 と同じ日付になる。
+    /// </summary>
+    [Theory]
+    // 日付の書式(yyyy-mm-dd)のセル
+    [InlineData(false, false, 1d, "1900-01-01", 1d, "1900-01")]
+    [InlineData(false, false, 61d, "1900-03-01", 61d, "1900-03")]
+    [InlineData(false, false, 2958465d, "9999-12-31", 2958435d, "9999-12")]
+    [InlineData(false, true, 0d, "1904-01-01", 0d, "1904-01")]
+    [InlineData(false, true, 59d, "1904-02-29", 31d, "1904-02")]
+    [InlineData(false, true, 61d, "1904-03-02", 91d, "1904-04")]
+    [InlineData(false, true, 2957003d, "9999-12-31", 2956973d, "9999-12")]
+    // 日本語の決まった日付の書式(番号 31 と 55)のセル
+    [InlineData(true, false, 1d, "1900-01-01", 1d, "1900-01")]
+    [InlineData(true, false, 61d, "1900-03-01", 61d, "1900-03")]
+    [InlineData(true, false, 2958465d, "9999-12-31", 2958435d, "9999-12")]
+    [InlineData(true, true, 0d, "1904-01-01", 0d, "1904-01")]
+    [InlineData(true, true, 2957003d, "9999-12-31", 2956973d, "9999-12")]
+    public void Date_cells_at_the_ends_of_real_dates_are_read(bool japaneseFormat, bool use1904DateSystem, double dateSerial, string date, double monthSerial, string month)
+    {
+        PutSerials(japaneseFormat, use1904DateSystem, dateSerial, monthSerial);
+
+        var plan = PlanWorkbookReader.ReadWorkbook(workbookPath);
+
+        Assert.Equal(DateOnly.ParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture), plan.ConstructionWorks[0].StartDate);
+        Assert.Equal(YearMonth.Of(DateOnly.ParseExact(month + "-01", "yyyy-MM-dd", CultureInfo.InvariantCulture)), plan.ActualCosts[0].Month);
+    }
+
     /// <summary>真偽のセルは、真偽の列でも受け付けない。表示される文字は、Excel と同じ「TRUE」「FALSE」。</summary>
     [Fact]
     public void Boolean_cell_is_reported_with_its_displayed_text()
@@ -619,7 +683,7 @@ public sealed class WorkbookReaderTests : IDisposable
     /// <summary>真偽のセルは、年度・日付の列でも受け付けない。</summary>
     [Theory]
     [InlineData("予算年割", "年度", true, "「TRUE」は西暦4桁の年度ではありません。")]
-    // 日付の列の真偽のセル。文は決まり8の例の形で、D1(利用者に確認中)の答えが出るまで落ちたままにする
+    // 日付の列の真偽のセル
     [InlineData("工事", "開始日", true, "「TRUE」は YYYY-MM-DD の日付ではありません。")]
     public void Boolean_cell_in_other_columns_is_reported(string sheet, string column, bool value, string message)
     {
@@ -1034,6 +1098,51 @@ public sealed class WorkbookReaderTests : IDisposable
     /// <summary>1つのセルを変えて保存する。</summary>
     private void Put(string sheet, int row, string column, XLCellValue value, string? format = null) =>
         Edit(workbook => Set(workbook, sheet, row, column, value, format));
+
+    /// <summary>
+    /// ブックを、use1904DateSystem なら1904年の日付の仕組みにし、工事の2行目の開始日を dateSerial、実績の2行目の年月を monthSerial のシリアル値の数値のセルにして保存する。
+    /// 書式は、japaneseFormat なら日本語の決まった日付の書式(開始日は番号 31、年月は番号 55)、そうでなければ日付の書式(yyyy-mm-dd)にする。
+    /// 保存したセルを、ClosedXML が日付の書式のセルは日付のセルとして、日本語の決まった書式のセルは数値のセルとして読み、
+    /// 1904年の仕組みの日付の書式のセルのほかは、保存したシリアル値をそのままセルの値として持つことを確かめる(テストの前提)。
+    /// </summary>
+    private void PutSerials(bool japaneseFormat, bool use1904DateSystem, double dateSerial, double monthSerial)
+    {
+        (string Sheet, string Column, double Serial, int FormatId)[] cells = [("工事", "開始日", dateSerial, 31), ("実績", "年月", monthSerial, 55)];
+        Edit(workbook =>
+        {
+            workbook.Use1904DateSystem = use1904DateSystem;
+            foreach (var (sheet, column, serial, formatId) in cells)
+            {
+                var cell = Cell(workbook, sheet, 2, column);
+                cell.Value = serial;
+                if (japaneseFormat)
+                {
+                    cell.Style.NumberFormat.NumberFormatId = formatId;
+                }
+                else
+                {
+                    cell.Style.NumberFormat.Format = InputWorkbooks.DateFormat;
+                }
+            }
+        });
+
+        using var saved = new XLWorkbook(workbookPath);
+        Assert.Equal(use1904DateSystem, saved.Use1904DateSystem);
+        foreach (var (sheet, column, serial, formatId) in cells)
+        {
+            var cell = Cell(saved, sheet, 2, column);
+            Assert.Equal(japaneseFormat ? XLDataType.Number : XLDataType.DateTime, cell.DataType);
+            if (japaneseFormat)
+            {
+                Assert.Equal(formatId, cell.Style.NumberFormat.NumberFormatId);
+            }
+
+            if (japaneseFormat || !use1904DateSystem)
+            {
+                Assert.Equal(serial, cell.Value.GetUnifiedNumber());
+            }
+        }
+    }
 
     /// <summary>セルが、空の文字("")の文字のセルか。</summary>
     private static bool IsEmptyText(IXLCell cell) => cell.Value.IsText && cell.Value.GetText().Length == 0;

@@ -313,6 +313,87 @@ public sealed partial class ConsoleAppTests
         Assert.False(Directory.Exists(OutputDirectory));
     }
 
+    /// <summary>
+    /// 入力と出力先に同じブックを指定したら、読み込む前に引数の誤りで止め、入力のブックを変えない。同じかは、フルパスにして比べる
+    /// (「.」と「..」を含む書き方も同じブック)。文のパスは、--output に書いたとおり。
+    /// </summary>
+    [Theory]
+    [InlineData("入力.xlsx")]
+    [InlineData("./入力.xlsx")]
+    [InlineData("ブック/../入力.xlsx")]
+    public void Same_workbook_for_input_and_output_is_reported(string outputName)
+    {
+        var input = CopyWorkbook("例12/条件1");
+        var written = File.ReadAllBytes(input);
+        var output = Path.Combine(directory, outputName.Replace('/', Path.DirectorySeparatorChar));
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, output]);
+
+        Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
+        Assert.Equal([$"入力と出力先に同じブックは指定できません: {output}", string.Empty], Lines(run.Error));
+        Assert.Empty(run.Output);
+        Assert.Equal(written, File.ReadAllBytes(input));
+        Assert.Equal(["入力.xlsx"], Directory.EnumerateFileSystemEntries(directory).Select(Path.GetFileName));
+    }
+
+    /// <summary>出力先を今のフォルダからの相対パスで書いても、フルパスにすると入力と同じブックなら止める。</summary>
+    [Fact]
+    public void Same_workbook_written_as_a_relative_path_is_reported()
+    {
+        var input = CopyWorkbook("例12/条件1");
+        var written = File.ReadAllBytes(input);
+        var output = Path.GetRelativePath(Environment.CurrentDirectory, input);
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, output]);
+
+        Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
+        Assert.Equal($"入力と出力先に同じブックは指定できません: {output}", Lines(run.Error)[0]);
+        Assert.Equal(written, File.ReadAllBytes(input));
+    }
+
+    /// <summary>
+    /// 大文字と小文字だけが違うパスは、Windows と macOS では同じブックとして止め、ほかの OS では別のブックとして書き出す。どちらでも、入力のブックは変わらない。
+    /// </summary>
+    [Fact]
+    public void Workbook_paths_differing_only_in_case_are_compared_by_the_rule_of_the_os()
+    {
+        var input = CopyWorkbook("例12/条件1");
+        var written = File.ReadAllBytes(input);
+        var output = Path.Combine(directory, "入力.XLSX");
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, output]);
+
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        {
+            Assert.Equal(ConsoleApp.UsageError, run.ExitCode);
+            Assert.Equal($"入力と出力先に同じブックは指定できません: {output}", Lines(run.Error)[0]);
+        }
+        else
+        {
+            Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+            using var workbook = new XLWorkbook(output);
+            Assert.Equal(WrittenKinds, workbook.Worksheets.Select(sheet => sheet.Name));
+        }
+
+        Assert.Equal(written, File.ReadAllBytes(input));
+    }
+
+    /// <summary>入力のブックと同じフォルダの、別のブックには書き出せる。入力のブックは変わらない。</summary>
+    [Fact]
+    public void Results_can_be_written_to_another_workbook_next_to_the_input()
+    {
+        var input = CopyWorkbook("例12/条件1");
+        var written = File.ReadAllBytes(input);
+        var output = Path.Combine(directory, "結果.xlsx");
+
+        var run = Run([ConsoleArguments.Input, input, ConsoleArguments.Output, output]);
+
+        Assert.Equal(ConsoleApp.Succeeded, run.ExitCode);
+        Assert.Equal(written, File.ReadAllBytes(input));
+        using var workbook = new XLWorkbook(output);
+        Assert.Equal(WrittenKinds, workbook.Worksheets.Select(sheet => sheet.Name));
+    }
+
     [Fact]
     public void Workbook_violation_is_reported_with_sheet_and_row_and_nothing_is_written()
     {
