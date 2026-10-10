@@ -87,6 +87,17 @@ public sealed class CsvReaderTests : IDisposable
         Assert.Contains("知らない列: 単価円", exception.Message);
     }
 
+    /// <summary>
+    /// 列名が重複する CSV は、ブックと同じ文で1行目に示し、そのファイルの行は読まない(列の数が列名の行と合わない行があっても、重複だけを示す)。
+    /// </summary>
+    [Fact]
+    public void Duplicate_column_names_are_reported_before_rows_are_read()
+    {
+        File.WriteAllText(Path.Combine(directory, "単価.csv"), "ID,人員区分ID,年度,単価,削除済み,ID\n1,1\n", new UTF8Encoding(true));
+
+        Assert.Equal(["単価.csv 1行目: 列名が重複しています: ID"], PlanCsvReader.Read(directory).Errors.Select(error => error.Message));
+    }
+
     [Fact]
     public void All_malformed_values_are_collected_in_table_and_line_order()
     {
@@ -133,6 +144,19 @@ public sealed class CsvReaderTests : IDisposable
     [InlineData("人員区分", "表示順", "-2", "人員区分.csv 2行目 列「表示順」: 「-2」は0以上の整数ではありません。")]
     [InlineData("作業明細", "作業日数", "-1.5", "作業明細.csv 2行目 列「作業日数」: 「-1.5」は0以上の、小数点以下1桁までの数ではありません。")]
     public void Integer_and_work_day_errors_say_zero_or_more(string table, string column, string value, string message)
+    {
+        ReplaceFirstRowCell(table, column, value);
+
+        Assert.Equal(message, Assert.Single(PlanCsvReader.Read(directory).Errors).Message);
+    }
+
+    /// <summary>日付と年月の列の誤りの文は、「は」の後に半角の空白を置く(ブックから読んだときと同じ文)。</summary>
+    [Theory]
+    [InlineData("作業明細", "開始日", "2027/03/01", "作業明細.csv 2行目 列「開始日」: 「2027/03/01」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("工事", "開始日", "2027-02-30", "工事.csv 2行目 列「開始日」: 「2027-02-30」は YYYY-MM-DD の日付ではありません。")]
+    [InlineData("実績", "年月", "2027-13", "実績.csv 2行目 列「年月」: 「2027-13」は YYYY-MM の年月ではありません。")]
+    [InlineData("月別修正", "年月", "2027/06", "月別修正.csv 2行目 列「年月」: 「2027/06」は YYYY-MM の年月ではありません。")]
+    public void Date_and_year_month_errors_have_a_space_after_ha(string table, string column, string value, string message)
     {
         ReplaceFirstRowCell(table, column, value);
 

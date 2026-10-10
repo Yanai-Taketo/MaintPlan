@@ -2,13 +2,15 @@ using System.Globalization;
 using MaintPlan.Core.Calculation;
 using MaintPlan.Core.Model;
 using MaintPlan.IO.Csv;
+using MaintPlan.IO.Excel;
 using MaintPlan.IO.Input;
 using MaintPlan.IO.Results;
 
 namespace MaintPlan.Cli;
 
 /// <summary>
-/// 確認用コンソール。入力の CSV のフォルダを読んで確かめ、計算し、結果の表を出力先のフォルダに CSV で書き出す。
+/// 確認用コンソール。入力の CSV のフォルダかブック(.xlsx)を読んで確かめ、計算し、結果の表を出力先のフォルダに CSV で、
+/// 出力先の末尾が .xlsx ならブック1冊に書き出す。
 /// 読み込み時には、形の違う値をすべて示す。形の違う値がなければ、入力の決まりに合わない行と保存できない条件に当たる行をすべて示す。
 /// 終了コードは、書き出せたら0、読み込み・入力の確認・計算・書き出しの誤りなら1、引数の誤りなら2。
 /// 誤りがあったときと、上書きするファイルがほかで開かれているときは、表を1つも書き出さない。
@@ -18,6 +20,9 @@ public static class ConsoleApp
     public const int Succeeded = 0;
     public const int Failed = 1;
     public const int UsageError = 2;
+
+    /// <summary>ブックの拡張子。大文字と小文字は区別しない。</summary>
+    private const string WorkbookExtension = ".xlsx";
 
     /// <summary>today は、集計基準日を省いたときに使う、日本時間の当日の日付。</summary>
     public static int Run(IReadOnlyList<string> args, TextWriter output, TextWriter error, DateOnly today)
@@ -41,13 +46,21 @@ public static class ConsoleApp
             return Succeeded;
         }
 
-        if (!Directory.Exists(arguments.InputPath))
+        if (InputProblem(arguments.InputPath) is { } inputProblem)
         {
-            error.WriteLine($"入力のフォルダがありません: {arguments.InputPath}");
+            error.WriteLine(inputProblem);
             return UsageError;
         }
 
-        if (File.Exists(Path.TrimEndingDirectorySeparator(arguments.OutputPath)))
+        var readsWorkbook = !Directory.Exists(arguments.InputPath);
+        var writesWorkbook = IsWorkbook(arguments.OutputPath);
+        if (readsWorkbook && writesWorkbook && IsSamePath(arguments.InputPath, arguments.OutputPath))
+        {
+            error.WriteLine($"入力と出力先に同じブックは指定できません: {arguments.OutputPath}");
+            return UsageError;
+        }
+
+        if (!writesWorkbook && File.Exists(Path.TrimEndingDirectorySeparator(arguments.OutputPath)))
         {
             error.WriteLine($"出力先にはフォルダを指定します。同じ名前のファイルがあります: {arguments.OutputPath}");
             return UsageError;
@@ -63,7 +76,7 @@ public static class ConsoleApp
         PlanReadResult read;
         try
         {
-            read = PlanCsvReader.Read(arguments.InputPath);
+            read = readsWorkbook ? PlanWorkbookReader.Read(arguments.InputPath) : PlanCsvReader.Read(arguments.InputPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -111,15 +124,26 @@ public static class ConsoleApp
             return Failed;
         }
 
-        var fileNames = result.Tables.Select(table => table.Name + ".csv").ToList();
-        var filePaths = fileNames.Select(fileName => Path.Combine(arguments.OutputPath, fileName)).ToList();
+        // ブックに書いたときはシート名を、フォルダに書いたときはファイル名を、画面に示す
+        var writtenNames = writesWorkbook
+            ? result.Tables.Select(table => table.Name).ToList()
+            : result.Tables.Select(table => table.Name + ".csv").ToList();
         try
         {
-            Directory.CreateDirectory(arguments.OutputPath);
-            EnsureNotInUse(filePaths);
-            foreach (var (table, filePath) in result.Tables.Zip(filePaths))
+            if (writesWorkbook)
             {
-                ResultCsvWriter.Write(filePath, table.Table);
+                EnsureNotInUse([arguments.OutputPath]);
+                ResultWorkbookWriter.Write(arguments.OutputPath, result.Tables);
+            }
+            else
+            {
+                var filePaths = writtenNames.Select(fileName => Path.Combine(arguments.OutputPath, fileName)).ToList();
+                Directory.CreateDirectory(arguments.OutputPath);
+                EnsureNotInUse(filePaths);
+                foreach (var (table, filePath) in result.Tables.Zip(filePaths))
+                {
+                    ResultCsvWriter.Write(filePath, table.Table);
+                }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -130,16 +154,44 @@ public static class ConsoleApp
 
         WriteMissingAmounts(output, result.MissingAmounts);
         output.WriteLine($"書き出し: {arguments.OutputPath}");
-        foreach (var fileName in fileNames)
+        foreach (var name in writtenNames)
         {
-            output.WriteLine($"  {fileName}");
+            output.WriteLine($"  {name}");
         }
 
         return Succeeded;
     }
 
     /// <summary>
-    /// 上書きするファイルが、ほかで(Excel などで)開かれていないことと、書き出すファイルと同じ名前のフォルダがないことを確かめる。
+    /// 入力の誤りの文。フォルダは CSV のフォルダとして、拡張子が .xlsx のファイルはブックとして読むので、誤りはない(null)。
+    /// </summary>
+    private static string? InputProblem(string inputPath)
+    {
+        if (Directory.Exists(inputPath))
+        {
+            return null;
+        }
+
+        if (File.Exists(inputPath))
+        {
+            return IsWorkbook(inputPath) ? null : $"入力には、CSV のフォルダか .xlsx のブックを指定します: {inputPath}";
+        }
+
+        return IsWorkbook(inputPath) ? $"入力のブックがありません: {inputPath}" : $"入力のフォルダがありません: {inputPath}";
+    }
+
+    /// <summary>パスの末尾が .xlsx か。</summary>
+    private static bool IsWorkbook(string path) => path.EndsWith(WorkbookExtension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>2つのパスが同じか。フルパスにして比べ、Windows と macOS では大文字と小文字を区別しない。</summary>
+    private static bool IsSamePath(string path, string other) =>
+        string.Equals(
+            Path.GetFullPath(path),
+            Path.GetFullPath(other),
+            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    /// <summary>
+    /// 上書きするファイル(CSV かブック)が、ほかで(Excel などで)開かれていないことと、書き出すファイルと同じ名前のフォルダがないことを確かめる。
     /// 当たるものがあれば IOException にする。一部のファイルだけが新しい結果になるのを防ぐため、書き始める前にすべてを確かめる。
     /// </summary>
     private static void EnsureNotInUse(IEnumerable<string> filePaths)

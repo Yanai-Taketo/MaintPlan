@@ -32,10 +32,10 @@ public sealed record ConsoleArguments(
 
     public static string Usage { get; } = string.Join(
         Environment.NewLine,
-        "使い方: MaintPlan.Cli --input <入力のフォルダ> --output <出力先のフォルダ> [集計の条件]",
+        "使い方: MaintPlan.Cli --input <入力のフォルダかブック> --output <出力先のフォルダかブック> [集計の条件]",
         "",
-        "  --input        9つのテーブルの CSV を置いたフォルダ。決まりに合わない行があれば、行を示して書き出さない",
-        "  --output       結果の表の CSV を書き出すフォルダ。なければ作り、同じ名前のファイルは上書きする",
+        "  --input        9つのテーブルの CSV を置いたフォルダか、9つのテーブルのシートを置いたブック(.xlsx)。決まりに合わない行があれば、行を示して書き出さない",
+        "  --output       結果の表を書き出す先。末尾が .xlsx ならブック(表ごとのシート)に、それ以外はフォルダ(表ごとの CSV)に書き出す。なければ作り、同じ名前のファイルは上書きする",
         "",
         "集計の条件(省いたときの値)",
         "  --amount-kind  山積みの金額の種類。予算額・見積額・実績額のどれか1つ(3つとも)",
